@@ -1,10 +1,10 @@
-# Voicebot development agreement
+# Mutsumi development agreement
 
 ## Roles
 
 - The human owner chooses product scope and, together with the supervising Codex agent, cloud providers/models and material tradeoffs.
 - The supervising Codex agent owns architecture, interfaces, path organization, task briefs, review, and acceptance.
-- DeepSeek, invoked through Codex CLI, implements application code inside the approved task's file scope. Do not silently replace this delegation with another model.
+- Qwen3.8-Flash, invoked through Codex CLI, implements application code inside the approved task's file scope. The owner replaced DeepSeek on 2026-10-01; do not run further DeepSeek coding tasks. Historical DeepSeek briefs/reports describe prior work only. Do not silently replace the selected implementation model.
 - Architecture and provider proposals are not approved merely because they appear in a document. Read `docs/decisions.md` for status before implementation.
 
 ## Scope and paths
@@ -19,7 +19,7 @@
 ## Secrets and data
 
 - The supervising launcher may load specifically required credential variables from root `.env` into the process environment. Never evaluate dotenv content as executable code.
-- Implementing agents must not open `.env`, enumerate secret environment variables, or include credentials in prompts, reports, commands, logs, frontend bundles, or fixtures.
+- Implementing agents must not open `.env`, enumerate secret environment variables, or include credentials in prompts, reports, commands, logs, frontend bundles, or fixtures. Provider keys are separate; never send the old DeepSeek key to Qwen.
 - `.env.example` contains variable names and empty values only, except non-secret example service addresses.
 - Real audio, conversations, database files, and raw provider responses belong in ignored `data/`; coding-run artifacts belong in ignored `.runtime/`.
 - A model/provider may only receive the task context needed for its authorized role. Coding runs use synthetic fixtures, not private recorded conversations.
@@ -27,7 +27,7 @@
 ## Implementation and acceptance
 
 - After each individual tracked-file creation or modification, immediately stage that exact file and create one Git commit before editing another file. Avoid batching several file edits into a single patch or commit. Generated/ignored secrets, recordings, logs, and build artifacts are excluded; never force-add them. If committing fails, resolve or report the failure before continuing edits.
-- DeepSeek may draft commit messages; the supervisor verifies that each message matches the diff. Use explicit file paths when staging, preserve unrelated staged changes, and never amend/rewrite history without authorization. Small intermediate commits are expected; only independent acceptance establishes a module is complete.
+- The implementation model may draft commit messages; the supervisor verifies that each message matches the diff. Use explicit file paths when staging, preserve unrelated staged changes, and never amend/rewrite history without authorization. Small intermediate commits are expected; only independent acceptance establishes a module is complete.
 
 - Keep provider-specific payloads inside adapters. Domain objects and orchestration must not depend on vendor SDK types.
 - Missing emotion, timestamps, or sound-event capability is explicitly unavailable/unknown, not fabricated data.
