@@ -18,7 +18,7 @@ Status meanings: confirmed = agreed with the owner; proposed = awaiting discussi
 | D12 | Memory | proposed | Begin with persona file, recent-turn history, and explicit preferences. Semantic retrieval/automatic long-term memory requires a separate decision. |
 | D13 | Clip and request limits | proposed | Initial target: 30 seconds and 10 MiB per input clip; bounded provider timeouts and no unbounded retries. Confirm in task brief. |
 | D14 | Git workflow | confirmed | Immediately commit each tracked-file edit separately. Push to https://github.com/pellx/mutsumi after a substantial module passes supervisor acceptance. Never push .env, real audio or runtime logs. Remote was empty at inspection; origin is configured. |
-| D15 | Project name | confirmed | Owner named the project wakaba. Package and product documentation use this name. Existing workspace D:\\voicebot and designated remote pellx/mutsumi stay the current storage locations. |
+| D15 | Project name | confirmed | Owner finalized the project name as mutsumi, superseding the temporary wakaba name. Package and product documentation use mutsumi. Workspace is D:\\voicebot; designated remote is pellx/mutsumi. |
 
 ## Sources checked on 2026-10-01
 
