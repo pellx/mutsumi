@@ -38,6 +38,9 @@ const configs = {
   web_search: 'disabled',
   show_raw_agent_reasoning: false,
   approval_policy: 'never',
+  'windows.sandbox': 'elevated',
+  'features.apps': false,
+  'features.plugins': false,
   'model_providers.deepseek.name': 'DeepSeek official',
   'model_providers.deepseek.base_url': endpoint.href,
   'model_providers.deepseek.wire_api': 'responses',
@@ -70,5 +73,5 @@ try { result = await completion; } finally { clearTimeout(timer); }
 const events = stdout.split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(redact(line)); } catch { return { type: 'unparsed', text: redact(line) }; } });
 const report = { ...result, model, provider: endpoint.hostname, cli: version.stdout.trim(), task: relative, timedOut, overflow, events, stderr: redact(stderr) };
 await writeFile(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2));
-console.log(JSON.stringify(report));
+console.log(JSON.stringify({ ...result, model, timedOut, overflow, report_path: path.join(outputDir, 'report.json'), event_types: events.map(e => e.type), final_messages: events.filter(e => e.item?.type === 'agent_message').map(e => e.item.text), stderr: redact(stderr).slice(-3000) }));
 process.exitCode = result.code === 0 && !timedOut && !overflow ? 0 : 1;
