@@ -202,9 +202,14 @@ function isJsonObject(value: unknown): value is JsonObject {
 }
 
 /**
- * Reject own accessor (getter/setter) properties and symbol keys before any
- * field of the record is read: field access must not run user getters, and
- * symbol keys would be dropped by a JSON round-trip.
+ * Reject own accessor (getter/setter) properties, symbol keys and any
+ * non-enumerable own data property before any field of the record is read.
+ * Field access must not run user getters; symbol keys and non-enumerable own
+ * properties would be dropped by `JSON.stringify` and are invisible to
+ * `checkKnownKeys` (which walks enumerable keys only). A non-enumerable
+ * schema field such as `transcript` would otherwise pass validation and then
+ * vanish on serialization. Returning false tells the caller to stop reading
+ * fields from this record.
  */
 function checkRecordShape(value: JsonObject, path: string, issues: ValidationIssue[]): boolean {
   let isPlainDataRecord = true;
@@ -218,11 +223,23 @@ function checkRecordShape(value: JsonObject, path: string, issues: ValidationIss
   }
   for (const key of Object.getOwnPropertyNames(value)) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor !== undefined && (descriptor.get !== undefined || descriptor.set !== undefined)) {
+    if (descriptor === undefined) {
+      continue;
+    }
+    if (descriptor.get !== undefined || descriptor.set !== undefined) {
       pushIssue(
         issues,
         joinPath(path, key),
         `property "${key}" must be a plain data property, not a getter or setter`,
+      );
+      isPlainDataRecord = false;
+      continue;
+    }
+    if (!descriptor.enumerable) {
+      pushIssue(
+        issues,
+        joinPath(path, key),
+        `property "${key}" must be an enumerable own property; JSON serialization would drop it`,
       );
       isPlainDataRecord = false;
     }
@@ -256,10 +273,15 @@ function isArrayIndexKey(key: string): boolean {
 }
 
 /**
- * Verify that a schema array is a dense JSON-domain container. `Array#forEach`
- * skips holes and `JSON.stringify` writes them as `null`, so missing own
- * indexed elements and non-index array properties are reported here instead of
- * silently passing validation.
+ * Verify that a schema array is a dense, ordinary JSON-domain container before
+ * any element is read. `Array#forEach` skips holes and `JSON.stringify` writes
+ * them as `null`, own accessors would run user getters, and non-index own
+ * properties (enumerable or not) are silently dropped by a round-trip. Only
+ * plain `Array.prototype` arrays are accepted, so subclassed or
+ * prototype-swapped arrays cannot smuggle in inherited serialization.
+ *
+ * A `false` result means the caller must not read any element; every problem
+ * found is still reported, including one indexed issue per missing element.
  */
 function checkArrayShape(
   input: unknown,
@@ -269,23 +291,45 @@ function checkArrayShape(
   if (!Array.isArray(input)) {
     return false;
   }
+  if (Object.getPrototypeOf(input) !== Array.prototype) {
+    pushIssue(
+      issues,
+      path,
+      'array must be an ordinary Array.prototype array; subclassed or prototype-swapped arrays are not part of the v0.1 contract',
+    );
+    return false;
+  }
+  let isShapedArray = true;
   for (let index = 0; index < input.length; index += 1) {
-    if (!Object.prototype.hasOwnProperty.call(input, index)) {
+    const descriptor = Object.getOwnPropertyDescriptor(input, index);
+    if (descriptor === undefined) {
       pushIssue(
         issues,
         indexPath(path, index),
         'array element is missing (sparse array); a JSON round-trip would not preserve this array',
       );
+      isShapedArray = false;
+      continue;
     }
-  }
-  for (const key of Object.keys(input)) {
-    if (!isArrayIndexKey(key)) {
+    if (descriptor.get !== undefined || descriptor.set !== undefined) {
       pushIssue(
         issues,
-        joinPath(path, key),
-        `non-index array property "${key}" is not part of the v0.1 contract`,
+        indexPath(path, index),
+        'array element must be a plain data property, not a getter or setter',
       );
+      isShapedArray = false;
     }
+  }
+  for (const key of Object.getOwnPropertyNames(input)) {
+    if (key === 'length' || isArrayIndexKey(key)) {
+      continue;
+    }
+    pushIssue(
+      issues,
+      joinPath(path, key),
+      `non-index array property "${key}" is not part of the v0.1 contract`,
+    );
+    isShapedArray = false;
   }
   for (const symbol of Object.getOwnPropertySymbols(input)) {
     pushIssue(
@@ -293,8 +337,9 @@ function checkArrayShape(
       path,
       `symbol-keyed array property "${String(symbol)}" is not part of the v0.1 contract`,
     );
+    isShapedArray = false;
   }
-  return true;
+  return isShapedArray;
 }
 
 function isSafeInteger(value: unknown): value is number {
