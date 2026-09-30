@@ -5,7 +5,7 @@
 1. Discuss the module's purpose, chosen provider/model, input/output, unsupported capabilities, and cost-relevant behavior with the owner.
 2. Supervisor records confirmed decisions and releases a task brief with exact allowed paths and acceptance criteria.
 3. Launcher reads only required coding-provider settings from `.env` in memory and invokes DeepSeek through `codex exec`. Never put keys in the prompt, command arguments or model catalog.
-4. DeepSeek implements the task, runs the assigned checks, and returns a changed-file summary plus limitations.
+4. Release exactly one tracked-file edit per coding invocation. DeepSeek makes one creation/modification patch and stops editing, runs read-only checks, and proposes a commit message. Supervisor immediately commits that exact file before releasing another edit. If more edits are required, use separate invocations.
 5. Supervisor inspects the changes and independently verifies contract behavior, errors, secret handling and actual integration where credentials/provider decisions permit.
 6. Supervisor sends concrete failure cases and expected behavior back through the same harness. Repeat within the released task, with finite run/time limits.
 7. Record acceptance or precise outstanding issues before releasing the next module.
@@ -15,7 +15,7 @@
 - Use the installed Codex CLI as the file/tool execution harness, with the selected DeepSeek provider as the inference model.
 - Current official DeepSeek documentation supports Responses API. Third-party provider compatibility must be checked independently.
 - Use invocation-local provider overrides and project-owned model metadata; do not run setup scripts that rewrite the user's global Codex configuration.
-- Use project-root working directory, workspace-write sandbox for implementation, and read-only mode for review-only tasks. Never select `danger-full-access` or bypass approval controls.
+- Use project-root working directory and workspace-write sandbox for implementation. The installed Windows elevated sandbox fails with setup-refresh errors locally; the official unelevated restricted-token sandbox passed H00. Child coding runs use approval_policy=never and cannot escalate. Never select `danger-full-access` or bypass approval controls.
 - Pass the task prompt via stdin. Do not include `.env`, real conversation recordings or unrelated personal files in context.
 - Keep the coding credential available to the API client while excluding it from generated shell-command environments where supported. This exclusion is not a filesystem security boundary; task instructions also prohibit reading `.env`.
 - Preserve inherited permission and exec-policy restrictions; do not disable policy rules to make the run succeed.
@@ -34,4 +34,6 @@
 
 ## Current prerequisite
 
-Await `.env` plus coding provider/model selection. The local CLI is installed, but authenticated execution and tool use are not yet verified. The CLI emits a home-directory warning under the current execution environment; diagnose before launching an implementation task.
+H00 accepted on 2026-10-01 with Codex CLI 0.159.2, official api.deepseek.com and deepseek-flash. The supervisor independently checked the JSON deliverable and clean tracked worktree. Run `node tools/harness/run-deepseek.mjs docs/tasks/TASK.md`; credentials are loaded from .env without appearing in command arguments. The launcher uses local model metadata, disables apps/plugins/web search for task focus, excludes the coding key from tool shell environments and records redacted reports in ignored .runtime. CLI zero exit alone does not establish task acceptance.
+
+After a substantial module passes independent acceptance, push committed public project files to origin (https://github.com/pellx/mutsumi), as authorized by the owner. Check ignore rules and tracked content first; do not upload .env, runtime logs or private recordings. Do not push unsuccessful drafts merely to mark progress.
