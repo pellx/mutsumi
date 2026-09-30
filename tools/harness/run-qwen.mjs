@@ -21,7 +21,8 @@ if (!approvedHost || endpoint.protocol !== 'https:' || endpoint.port || endpoint
 }
 const model = settings.QWEN_MODEL || 'qwen3.8-flash';
 if (model !== 'qwen3.8-flash') throw new Error('Only qwen3.8-flash is selected');
-const effort = settings.QWEN_REASONING_EFFORT || 'xhigh';
+const effortOverride = process.argv.slice(3).find(arg => arg.startsWith('--effort='))?.slice('--effort='.length);
+const effort = effortOverride || settings.QWEN_REASONING_EFFORT || 'xhigh';
 if (!['low', 'medium', 'xhigh'].includes(effort)) throw new Error('Invalid Qwen reasoning effort');
 const executable = process.env.VOICEBOT_CODEX_BIN || 'codex';
 const cli = spawnSync(executable, ['--version'], { encoding: 'utf8', shell: false });
