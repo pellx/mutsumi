@@ -24,6 +24,9 @@ if (model !== 'qwen3.8-flash') throw new Error('Only qwen3.8-flash is selected')
 const effortOverride = process.argv.slice(3).find(arg => arg.startsWith('--effort='))?.slice('--effort='.length);
 const effort = effortOverride || settings.QWEN_REASONING_EFFORT || 'xhigh';
 if (!['low', 'medium', 'xhigh'].includes(effort)) throw new Error('Invalid Qwen reasoning effort');
+const timeoutOverride = process.argv.slice(3).find(arg => arg.startsWith('--timeout-ms='))?.slice('--timeout-ms='.length);
+const timeoutMs = timeoutOverride ? Number(timeoutOverride) : 300000;
+if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 600000) throw new Error('Timeout must be 1000..600000 milliseconds');
 const executable = process.env.VOICEBOT_CODEX_BIN || 'codex';
 const cli = spawnSync(executable, ['--version'], { encoding: 'utf8', shell: false });
 if (cli.status !== 0) throw new Error('Codex CLI unavailable');
@@ -73,22 +76,36 @@ delete env.OPENAI_API_KEY;
 const outputDir = path.join(root, '.runtime/harness-runs', new Date().toISOString().replaceAll(':', '-'));
 await mkdir(outputDir, { recursive: true });
 const child = spawn(executable, args, { cwd: root, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
-let stdout = '', stderr = '', timedOut = false, overflow = false, cancelled = false;
+let stdout = '', stderr = '', progressBuffer = '', timedOut = false, overflow = false, cancelled = false;
 const limit = 4 * 1024 * 1024;
-child.stdout.on('data', chunk => { stdout += chunk; if (stdout.length > limit) { overflow = true; child.kill(); } });
+child.stdout.on('data', chunk => {
+  stdout += chunk;
+  if (stdout.length > limit) { overflow = true; child.kill(); return; }
+  progressBuffer += chunk;
+  const lines = progressBuffer.split('\n');
+  progressBuffer = lines.pop() || '';
+  for (const line of lines) {
+    try {
+      const event = JSON.parse(line);
+      if (event.item?.type === 'command_execution' && event.type === 'item.completed') {
+        console.log(JSON.stringify({ progress: 'tool_completed', exit_code: event.item.exit_code }));
+      }
+    } catch { /* Full redacted output is captured after completion. */ }
+  }
+});
 child.stderr.on('data', chunk => { stderr += chunk; if (stderr.length > limit) { overflow = true; child.kill(); } });
 child.stdin.on('error', () => {});
 const cancel = () => { cancelled = true; child.kill(); };
 process.once('SIGINT', cancel);
 process.once('SIGTERM', cancel);
-const timer = setTimeout(() => { timedOut = true; child.kill(); }, 300000);
+const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
 const completion = new Promise((resolve, reject) => { child.on('error', reject); child.on('close', (code, signal) => resolve({ code, signal })); });
 child.stdin.end(`Execute this brief. Read AGENTS.md first. Never read .env or enumerate environment variables. Do not delegate, discover connectors, edit unassigned files or call providers through shell. Stop after two identical infrastructure errors. For tracked files make exactly one edit patch; supervisor commits before the next edit.\n\n${prompt}`);
-console.log(JSON.stringify({ status: 'started', model, effort, provider: endpoint.hostname, task }));
+console.log(JSON.stringify({ status: 'started', model, effort, timeout_ms: timeoutMs, provider: endpoint.hostname, task }));
 let result;
 try { result = await completion; } finally { clearTimeout(timer); process.off('SIGINT', cancel); process.off('SIGTERM', cancel); }
 const events = stdout.split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(redact(line)); } catch { return { type: 'unparsed', text: redact(line) }; } });
-const report = { ...result, model, effort, provider: endpoint.hostname, cli: cli.stdout.trim(), task, timedOut, overflow, cancelled, events, stderr: redact(stderr) };
+const report = { ...result, model, effort, timeout_ms: timeoutMs, provider: endpoint.hostname, cli: cli.stdout.trim(), task, timedOut, overflow, cancelled, events, stderr: redact(stderr) };
 const reportPath = path.join(outputDir, 'report.json');
 await writeFile(reportPath, JSON.stringify(report, null, 2));
 console.log(JSON.stringify({ ...result, model, timedOut, overflow, cancelled, report_path: reportPath, final_messages: events.filter(e => e.item?.type === 'agent_message').map(e => e.item.text), stderr: redact(stderr).slice(-3000) }));
