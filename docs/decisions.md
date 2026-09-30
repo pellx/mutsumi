@@ -9,7 +9,7 @@ Status meanings: confirmed = agreed with the owner; proposed = awaiting discussi
 | D03 | Development roles | confirmed | Codex supervises architecture and acceptance; DeepSeek writes business code via Codex CLI. |
 | D04 | Credentials | confirmed | Owner places credentials in root `.env`; launcher reads them without exposing values. |
 | D05 | Coding provider | confirmed | Owner selected official DeepSeek API, base URL `https://api.deepseek.com`, and supplied `deepseek-flash` in .env. Coding model is separate from application dialogue model. |
-| D06 | CLI compatibility | verified-docs | Local Codex CLI 0.159.2 is installed. Current DeepSeek docs describe native Responses API and Codex integration. No authenticated run yet. CLI help also emits a home-directory warning; resolve it before declaring the harness operational. |
+| D06 | CLI compatibility | verified-runtime | Codex CLI 0.159.2 with official deepseek-flash completed H00 read/edit/read-back. Native elevated sandbox setup failed locally; the documented unelevated workspace sandbox succeeded. Approval escalation remains disabled inside coding runs. |
 | D07 | UI and stack | confirmed | Owner accepted TypeScript, browser UI and local Node backend, then requested NestJS. Domain contracts stay framework-independent; NestJS belongs in transport/application wiring. |
 | D08 | Input speech provider | proposed | Select ASR, timing, emotion, and sound-event capabilities individually. One provider is allowed to implement several ports if its API actually supports them. |
 | D09 | Dialogue provider | proposed | Not selected. Do not assume the coding DeepSeek key also selects or authorizes a runtime dialogue model. |
@@ -18,6 +18,7 @@ Status meanings: confirmed = agreed with the owner; proposed = awaiting discussi
 | D12 | Memory | proposed | Begin with persona file, recent-turn history, and explicit preferences. Semantic retrieval/automatic long-term memory requires a separate decision. |
 | D13 | Clip and request limits | proposed | Initial target: 30 seconds and 10 MiB per input clip; bounded provider timeouts and no unbounded retries. Confirm in task brief. |
 | D14 | Git workflow | confirmed | Immediately commit each tracked-file edit separately. Push to https://github.com/pellx/mutsumi after a substantial module passes supervisor acceptance. Never push .env, real audio or runtime logs. Remote was empty at inspection; origin is configured. |
+| D15 | Project name | confirmed | Owner named the project wakaba. Package and product documentation use this name. Existing workspace D:\\voicebot and designated remote pellx/mutsumi stay the current storage locations. |
 
 ## Sources checked on 2026-10-01
 
@@ -30,4 +31,4 @@ Status meanings: confirmed = agreed with the owner; proposed = awaiting discussi
 
 - Project originally contains `voice-system-flow.md` only; no business code or Git repository was present at inspection.
 - Owner filled root .env; values are not stored in this register.
-- H00 authenticated model/tool loop works, but first file-edit attempt failed because the child CLI defaulted to read-only without a native Windows sandbox selection. A workspace-write retry with the elevated Windows sandbox is underway. No business module is accepted yet.
+- H00 is accepted: .runtime/harness-smoke/result.json exists, is valid JSON and describes manual interaction with automatic_turn_detection=false. No tracked-file changes were produced by the smoke run. Business modules are not yet accepted.
