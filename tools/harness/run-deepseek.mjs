@@ -38,7 +38,11 @@ const configs = {
   web_search: 'disabled',
   show_raw_agent_reasoning: false,
   approval_policy: 'never',
-  'windows.sandbox': 'elevated',
+  // Official native fallback retains restricted-token workspace boundaries.
+  'windows.sandbox': 'unelevated',
+  default_permissions: 'voicebot-coding',
+  'permissions.voicebot-coding.extends': ':workspace',
+  'permissions.voicebot-coding.filesystem.":workspace_roots"."**/*.env"': 'deny',
   'features.apps': false,
   'features.plugins': false,
   'model_providers.deepseek.name': 'DeepSeek official',
@@ -51,7 +55,7 @@ const configs = {
   'model_providers.deepseek.stream_max_retries': 1,
   'shell_environment_policy.exclude': ['DEEPSEEK_API_KEY'],
 };
-const args = ['exec', '--ignore-user-config', '--ephemeral', '--json', '--color', 'never', '-C', root, '-s', 'workspace-write', '-m', model];
+const args = ['exec', '--ignore-user-config', '--ephemeral', '--json', '--color', 'never', '-C', root, '-m', model];
 for (const [name, value] of Object.entries(configs)) args.push('-c', `${name}=${JSON.stringify(value)}`);
 args.push('-');
 const env = { ...process.env, DEEPSEEK_API_KEY: key };
@@ -66,7 +70,7 @@ child.stderr.on('data', chunk => { stderr += chunk; if (stderr.length > limit) {
 child.stdin.on('error', () => {});
 const timer = setTimeout(() => { timedOut = true; child.kill(); }, 300000);
 const completion = new Promise((resolve, reject) => { child.on('error', reject); child.on('close', (code, signal) => resolve({ code, signal })); });
-child.stdin.end(`Execute the assigned brief below. Read AGENTS.md first. Do not read .env or enumerate environment variables. Do not delegate to other agents.\n\n${await readFile(taskPath, 'utf8')}`);
+child.stdin.end(`Execute the assigned brief below. Read AGENTS.md first. Do not read .env or enumerate environment variables. Do not delegate to other agents or discover connectors. If a shell or patch fails twice with the same infrastructure error, stop and report; do not probe other file paths.\n\n${await readFile(taskPath, 'utf8')}`);
 console.log(JSON.stringify({ status: 'started', model, provider: endpoint.hostname, cli: version.stdout.trim(), task: relative }));
 let result;
 try { result = await completion; } finally { clearTimeout(timer); }
