@@ -187,8 +187,114 @@ type ResolvedTiming =
   | { status: 'available'; start_ms: number; end_ms: number }
   | { status: 'unavailable' };
 
+/**
+ * A plain JSON record: an object whose prototype is `Object.prototype` or
+ * `null`. Class instances and objects that inherit their fields from another
+ * record (for example `Object.create(validDocument)`) are rejected here, since
+ * they would otherwise pass validation and then serialize to `{}`.
+ */
 function isJsonObject(value: unknown): value is JsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/**
+ * Reject own accessor (getter/setter) properties and symbol keys before any
+ * field of the record is read: field access must not run user getters, and
+ * symbol keys would be dropped by a JSON round-trip.
+ */
+function checkRecordShape(value: JsonObject, path: string, issues: ValidationIssue[]): boolean {
+  let isPlainDataRecord = true;
+  for (const symbol of Object.getOwnPropertySymbols(value)) {
+    pushIssue(
+      issues,
+      path,
+      `symbol-keyed property "${String(symbol)}" is not part of the v0.1 contract`,
+    );
+    isPlainDataRecord = false;
+  }
+  for (const key of Object.getOwnPropertyNames(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor !== undefined && (descriptor.get !== undefined || descriptor.set !== undefined)) {
+      pushIssue(
+        issues,
+        joinPath(path, key),
+        `property "${key}" must be a plain data property, not a getter or setter`,
+      );
+      isPlainDataRecord = false;
+    }
+  }
+  return isPlainDataRecord;
+}
+
+/**
+ * `isJsonObject` plus `checkRecordShape`. A `false` result means the caller
+ * must stop reading fields from the value; `message` is pushed when the value
+ * is not a plain JSON record at all.
+ */
+function requirePlainRecord(
+  input: unknown,
+  path: string,
+  message: string,
+  issues: ValidationIssue[],
+): input is JsonObject {
+  if (!isJsonObject(input)) {
+    pushIssue(issues, path, message);
+    return false;
+  }
+  return checkRecordShape(input, path, issues);
+}
+
+/** Canonical non-negative array index keys: `0`, `1`, ... (no leading zeros). */
+const ARRAY_INDEX_KEY = /^(?:0|[1-9][0-9]*)$/;
+
+function isArrayIndexKey(key: string): boolean {
+  return ARRAY_INDEX_KEY.test(key) && Number(key) < 4294967295;
+}
+
+/**
+ * Verify that a schema array is a dense JSON-domain container. `Array#forEach`
+ * skips holes and `JSON.stringify` writes them as `null`, so missing own
+ * indexed elements and non-index array properties are reported here instead of
+ * silently passing validation.
+ */
+function checkArrayShape(
+  input: unknown,
+  path: string,
+  issues: ValidationIssue[],
+): input is unknown[] {
+  if (!Array.isArray(input)) {
+    return false;
+  }
+  for (let index = 0; index < input.length; index += 1) {
+    if (!Object.prototype.hasOwnProperty.call(input, index)) {
+      pushIssue(
+        issues,
+        indexPath(path, index),
+        'array element is missing (sparse array); a JSON round-trip would not preserve this array',
+      );
+    }
+  }
+  for (const key of Object.keys(input)) {
+    if (!isArrayIndexKey(key)) {
+      pushIssue(
+        issues,
+        joinPath(path, key),
+        `non-index array property "${key}" is not part of the v0.1 contract`,
+      );
+    }
+  }
+  for (const symbol of Object.getOwnPropertySymbols(input)) {
+    pushIssue(
+      issues,
+      path,
+      `symbol-keyed array property "${String(symbol)}" is not part of the v0.1 contract`,
+    );
+  }
+  return true;
 }
 
 function isSafeInteger(value: unknown): value is number {
@@ -278,8 +384,7 @@ function checkNullablePositiveSafeInteger(
 }
 
 function validateAudioAssetInto(input: unknown, root: string, issues: ValidationIssue[]): void {
-  if (!isJsonObject(input)) {
-    pushIssue(issues, root, 'AudioAsset must be an object');
+  if (!requirePlainRecord(input, root, 'AudioAsset must be an object', issues)) {
     return;
   }
   checkKnownKeys(input, AUDIO_ASSET_KEYS, root, issues);
@@ -309,8 +414,14 @@ function validateTimingInto(
   issues: ValidationIssue[],
 ): ResolvedTiming | null {
   const firstIssueIndex = issues.length;
-  if (!isJsonObject(input)) {
-    pushIssue(issues, path, 'timing must be an object with status "available" or "unavailable"');
+  if (
+    !requirePlainRecord(
+      input,
+      path,
+      'timing must be an object with status "available" or "unavailable"',
+      issues,
+    )
+  ) {
     return null;
   }
   const status = input['status'];
@@ -377,8 +488,9 @@ function validateTimingInto(
 }
 
 function validateScoreInto(input: unknown, path: string, issues: ValidationIssue[]): void {
-  if (!isJsonObject(input)) {
-    pushIssue(issues, path, 'score must be an object with value and semantics');
+  if (
+    !requirePlainRecord(input, path, 'score must be an object with value and semantics', issues)
+  ) {
     return;
   }
   checkKnownKeys(input, SCORE_KEYS, path, issues);
@@ -425,14 +537,13 @@ function validateUnitsInto(
   wordTimingOk: boolean,
   issues: ValidationIssue[],
 ): void {
-  if (!Array.isArray(input)) {
+  if (!checkArrayShape(input, path, issues)) {
     pushIssue(issues, path, 'units must be an array');
     return;
   }
   input.forEach((raw, index) => {
     const unitPath = indexPath(path, index);
-    if (!isJsonObject(raw)) {
-      pushIssue(issues, unitPath, 'unit must be an object');
+    if (!requirePlainRecord(raw, unitPath, 'unit must be an object', issues)) {
       return;
     }
     checkKnownKeys(raw, TIMED_UNIT_KEYS, unitPath, issues);
@@ -485,14 +596,13 @@ function validateSegmentsInto(
   issues: ValidationIssue[],
 ): Set<string> {
   const segmentIds = new Set<string>();
-  if (!Array.isArray(input)) {
+  if (!checkArrayShape(input, path, issues)) {
     pushIssue(issues, path, 'segments must be an array');
     return segmentIds;
   }
   input.forEach((raw, index) => {
     const segmentPath = indexPath(path, index);
-    if (!isJsonObject(raw)) {
-      pushIssue(issues, segmentPath, 'segment must be an object');
+    if (!requirePlainRecord(raw, segmentPath, 'segment must be an object', issues)) {
       return;
     }
     checkKnownKeys(raw, SEGMENT_KEYS, segmentPath, issues);
@@ -544,15 +654,14 @@ function validateObservationsInto(
   segmentIds: Set<string>,
   issues: ValidationIssue[],
 ): void {
-  if (!Array.isArray(input)) {
+  if (!checkArrayShape(input, path, issues)) {
     pushIssue(issues, path, 'observations must be an array');
     return;
   }
   const observationIds = new Set<string>();
   input.forEach((raw, index) => {
     const observationPath = indexPath(path, index);
-    if (!isJsonObject(raw)) {
-      pushIssue(issues, observationPath, 'observation must be an object');
+    if (!requirePlainRecord(raw, observationPath, 'observation must be an object', issues)) {
       return;
     }
     checkKnownKeys(raw, OBSERVATION_KEYS, observationPath, issues);
@@ -625,7 +734,7 @@ function validateObservationsInto(
       return;
     }
     const referencesPath = joinPath(observationPath, 'segment_ids');
-    if (!Array.isArray(references)) {
+    if (!checkArrayShape(references, referencesPath, issues)) {
       pushIssue(issues, referencesPath, 'segment_ids must be an array');
       return;
     }
@@ -647,8 +756,7 @@ function validateCapabilityInto(
   path: string,
   issues: ValidationIssue[],
 ): CapabilityStatus | null {
-  if (!isJsonObject(input)) {
-    pushIssue(issues, path, 'capability must be an object with a status');
+  if (!requirePlainRecord(input, path, 'capability must be an object with a status', issues)) {
     return null;
   }
   const status = input['status'];
@@ -706,7 +814,7 @@ function validateCapabilityInto(
 
 export function validateAudioAsset(input: unknown): ValidationResult<AudioAsset> {
   const issues: ValidationIssue[] = [];
-  validateAudioAssetInto(input, ASSET_ROOT === 'asset' ? DOCUMENT_ROOT : DOCUMENT_ROOT, issues);
+  validateAudioAssetInto(input, DOCUMENT_ROOT, issues);
   if (issues.length > 0) {
     return { ok: false, issues };
   }
@@ -725,8 +833,7 @@ export function validateAnnotatedAudio(
     return { ok: false, issues };
   }
 
-  if (!isJsonObject(input)) {
-    pushIssue(issues, DOCUMENT_ROOT, 'AnnotatedAudio must be an object');
+  if (!requirePlainRecord(input, DOCUMENT_ROOT, 'AnnotatedAudio must be an object', issues)) {
     return { ok: false, issues };
   }
   checkKnownKeys(input, ANNOTATED_AUDIO_KEYS, DOCUMENT_ROOT, issues);
@@ -767,13 +874,13 @@ export function validateAnnotatedAudio(
 
   const capabilitiesRaw = input['capabilities'];
   const capabilitiesPath = joinPath(DOCUMENT_ROOT, 'capabilities');
-  if (!isJsonObject(capabilitiesRaw)) {
-    pushIssue(
-      issues,
-      capabilitiesPath,
-      'capabilities must be an object with word_timing, emotion, prosody and sound_event',
-    );
-  } else {
+  const capabilitiesValid = requirePlainRecord(
+    capabilitiesRaw,
+    capabilitiesPath,
+    'capabilities must be an object with word_timing, emotion, prosody and sound_event',
+    issues,
+  );
+  if (capabilitiesValid) {
     checkKnownKeys(capabilitiesRaw, CAPABILITIES_KEYS, capabilitiesPath, issues);
     wordTimingOk =
       validateCapabilityInto(
@@ -824,12 +931,16 @@ export function parseAnnotatedAudio(
   json: string,
   asset: AudioAsset,
 ): ValidationResult<AnnotatedAudio> {
-  if (typeof json !== 'string') {
-    pushUnreachableGuard();
+  const input: unknown = json;
+  if (typeof input !== 'string') {
+    return {
+      ok: false,
+      issues: [{ path: DOCUMENT_ROOT, message: 'input must be a JSON string' }],
+    };
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(json);
+    parsed = JSON.parse(input);
   } catch {
     return {
       ok: false,
@@ -837,10 +948,6 @@ export function parseAnnotatedAudio(
     };
   }
   return validateAnnotatedAudio(parsed, asset);
-}
-
-function pushUnreachableGuard(): never {
-  throw new TypeError('parseAnnotatedAudio expects a JSON string');
 }
 
 export function serializeAnnotatedAudio(document: AnnotatedAudio, asset: AudioAsset): string {
