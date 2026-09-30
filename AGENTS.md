@@ -26,6 +26,9 @@
 
 ## Implementation and acceptance
 
+- After each individual tracked-file creation or modification, immediately stage that exact file and create one Git commit before editing another file. Avoid batching several file edits into a single patch or commit. Generated/ignored secrets, recordings, logs, and build artifacts are excluded; never force-add them. If committing fails, resolve or report the failure before continuing edits.
+- DeepSeek may draft commit messages; the supervisor verifies that each message matches the diff. Use explicit file paths when staging, preserve unrelated staged changes, and never amend/rewrite history without authorization. Small intermediate commits are expected; only independent acceptance establishes a module is complete.
+
 - Keep provider-specific payloads inside adapters. Domain objects and orchestration must not depend on vendor SDK types.
 - Missing emotion, timestamps, or sound-event capability is explicitly unavailable/unknown, not fabricated data.
 - Planned speech timing differs from measured output timing. Never report a plan as a measured timestamp.
