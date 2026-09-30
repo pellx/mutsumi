@@ -1,4 +1,6 @@
-# Voicebot initial architecture — discussion draft
+# Mutsumi initial architecture
+
+Confirmed stack: TypeScript, local Node backend using NestJS, browser UI. Module/provider details below are proposals until their task is released. Input annotation contracts are implemented independently of NestJS; cloud speech/dialogue/TTS providers remain unselected.
 
 ## Product behavior
 
@@ -39,7 +41,7 @@ D:\voicebot\
     architecture.md               this design
     contracts.md                  data and provider contracts
     development-workflow.md       delegation and acceptance
-    tasks/                        bounded DeepSeek task briefs
+    tasks/                        bounded Qwen task briefs and historical work
     reviews/                      supervisor review findings
   apps/
     server/src/
@@ -62,7 +64,7 @@ Directories under `apps`, `tests`, and `tools` are a proposed layout, not claims
 
 ## First deliveries
 
-1. H00: verify the DeepSeek-backed Codex CLI harness with a restricted smoke task.
+1. H00-Qwen: verify the Alibaba Qwen-backed Codex CLI harness with a restricted smoke task. DeepSeek has been retired by the owner.
 2. M01: implement provider-independent annotation contracts and validation after this design is discussed.
 3. M02: audio input + selected analysis provider; inspect actual annotation quality before proceeding.
 4. M03: selected dialogue model + persona + basic history.
