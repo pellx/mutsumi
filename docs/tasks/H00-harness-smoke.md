@@ -1,6 +1,6 @@
 # H00 — DeepSeek Codex CLI smoke task
 
-Status: draft; not dispatched. Release after provider/model and credentials are supplied.
+Status: released on 2026-10-01. Owner supplied official DeepSeek credentials and selected deepseek-flash in .env. Supervisor runs this task only; application providers remain pending discussion.
 
 ## Purpose
 
