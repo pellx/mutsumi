@@ -12,18 +12,22 @@ const cap = (p, m) => ({ status: 'ok', source_provider: p, source_model: m });
 const gap = (s, reason) => ({ status: s, reason });
 const ASSET = { asset_id: 'asset-1', media_type: 'audio/wav', duration_ms: 4000, sample_rate_hz: 16000, channels: 1 };
 const drop = (o, k) => (({ [k]: _omit, ...rest }) => rest)(o);
+// Redefining an existing own data property keeps its current attributes, so a
+// fixture that must be non-enumerable has to say so explicitly.
+const hideProp = (o, k, v) => Object.defineProperty(o, k, { value: v, enumerable: false, writable: true, configurable: true });
+const isHidden = (o, k) => Object.getOwnPropertyDescriptor(o, k).enumerable === false;
 
 const doc = () => ({
   schema_version: '0.1',
   asset_id: 'asset-1',
-  transcript: '今日は少し疲れているみたいですね。',
+  transcript: '今天有点累了。',
   segments: [
-    { segment_id: 'seg-0', text: '今日は少し', timing: at(0, 1200), units: [
-      { text: '今日', granularity: 'word', timing: at(0, 600) },
-      { text: 'は', granularity: 'word', timing: at(700, 780) },
-      { text: '少し', granularity: 'word', timing: at(900, 1200) },
+    { segment_id: 'seg-0', text: '今天有点', timing: at(0, 1200), units: [
+      { text: '今天', granularity: 'word', timing: at(0, 600) },
+      { text: '有', granularity: 'word', timing: at(700, 780) },
+      { text: '点', granularity: 'word', timing: at(900, 1200) },
     ] },
-    { segment_id: 'seg-1', text: '疲れているみたいですね。', speaker_id: 'speaker-a', timing: at(1400, 3900) },
+    { segment_id: 'seg-1', text: '累了。', speaker_id: 'speaker-a', timing: at(1400, 3900) },
   ],
   observations: [
     { observation_id: 'obs-0', kind: 'emotion', label: 'sad', timing: at(0, 3900), source_provider: 'emo-lab',
@@ -40,6 +44,9 @@ const doc = () => ({
 });
 
 const edit = (fn) => { const d = doc(); fn(d); return d; };
+// `va` supplies the valid default asset fixture. A case that must exercise an
+// invalid asset, including an explicitly supplied undefined, calls
+// validateAnnotatedAudio directly so the default cannot mask it.
 const va = (d, a = ASSET) => validateAnnotatedAudio(d, a);
 const pathsOf = (r) => (r.issues || []).map((i) => i.path).join('\n');
 const textOf = (r) => (r.issues || []).map((i) => `${i.path} ${i.message}`).join('\n');
@@ -92,7 +99,14 @@ test('missing word timing and unknown emotion stay explicit, never fabricated', 
   const r = va(d);
   assert.equal(r.ok, true, textOf(r));
   const unit = r.value.segments[0].units[0];
-  assert.deepEqual(unit.timing, { status: 'unavailable', reason: 'asr has no alignment support' });
+  // The per-unit reason and the capability reason state different things;
+  // validation must keep both verbatim, never rewrite one into the other.
+  assert.deepEqual(unit.timing, { status: 'unavailable', reason: 'asr does not report word timing' });
+  assert.deepEqual(r.value.capabilities.word_timing,
+    { status: 'unavailable', reason: 'asr has no alignment support' });
+  for (const u of r.value.segments[0].units) {
+    assert.equal(u.timing.reason, 'asr does not report word timing', 'validator rewrote a unit reason');
+  }
   assert.ok(!('start_ms' in unit.timing) && !('end_ms' in unit.timing), 'fabricated zero timestamps');
   assert.ok(!JSON.stringify(r.value.segments[0].units).includes('start_ms'));
   assert.equal(r.value.observations[0].label, 'unknown');
@@ -128,13 +142,29 @@ test('silent transcript with empty arrays is valid', () => {
 });
 
 test('scores keep semantics and are not normalized or forced into one distribution', () => {
-  const mk = (id, provider, value, semantics) => ({ observation_id: id, kind: 'emotion', label: id === 'o1' ? 'joy' : 'sad',
-    timing: at(0, 3900), source_provider: provider, source_model: 'm', score: { value, semantics }, segment_ids: ['seg-0'] });
-  const d = edit((x) => { x.observations = [mk('o1', 'a', 7.4, 'ordinal'), mk('o2', 'b', 120, 'uncalibrated_score')]; });
+  const mk = (id, provider, value, semantics, timing, label) => ({ observation_id: id, kind: 'emotion', label,
+    timing, source_provider: provider, source_model: 'm', score: { value, semantics }, segment_ids: ['seg-0'] });
+  const d = edit((x) => {
+    x.observations = [
+      mk('o1', 'a', 7.4, 'ordinal', at(0, 3900), 'joy'),
+      mk('o2', 'b', 120, 'uncalibrated_score', at(0, 3900), 'sad'),
+      mk('o3', 'c', 0.7, 'probability', at(0, 2400), 'joy'),
+      mk('o4', 'c', 0.8, 'probability', at(1500, 3900), 'sad'),
+    ];
+  });
+  const before = structuredClone(d.observations.map((o) => o.score));
   const r = va(d);
   assert.equal(r.ok, true, textOf(r));
-  assert.deepEqual(r.value.observations.map((o) => o.score),
-    [{ value: 7.4, semantics: 'ordinal' }, { value: 120, semantics: 'uncalibrated_score' }]);
+  assert.deepEqual(r.value.observations.map((o) => o.score), before, 'scores were coerced');
+  assert.deepEqual(r.value.observations.map((o) => o.score), [
+    { value: 7.4, semantics: 'ordinal' }, { value: 120, semantics: 'uncalibrated_score' },
+    { value: 0.7, semantics: 'probability' }, { value: 0.8, semantics: 'probability' },
+  ]);
+  const probs = r.value.observations.filter((o) => o.score.semantics === 'probability').map((o) => o.score.value);
+  assert.equal(probs.length, 2);
+  assert.ok(probs[0] + probs[1] > 1, 'overlapping probability observations were rescaled to one distribution');
+  assert.ok(r.value.observations[2].timing.end_ms > r.value.observations[3].timing.start_ms,
+    'fixture should show overlapping emotion windows');
 });
 
 test('non-contiguous units and overlapping sound events are allowed', () => {
@@ -169,11 +199,21 @@ for (const [label, t] of TIMES) {
     assert.match(textOf(r), /units/);
   });
 }
-for (const [label, t] of [['unit starts before parent', at(-5, 900)], ['unit ends after parent', at(900, 3800)]]) {
+// Each unit interval below is otherwise valid and positive, so the only defect
+// is its relation to the parent window: containment itself is under test.
+const CONTAINMENT = [
+  ['unit starts before parent', at(200, 1200), at(100, 500)],
+  ['unit ends after parent', at(200, 1200), at(900, 1300)],
+];
+for (const [label, parent, unit] of CONTAINMENT) {
   test(`unit interval outside measured parent segment: ${label}`, () => {
-    const r = va(edit((x) => { x.segments[0].units = [{ text: '今日', granularity: 'word', timing: t }]; }));
+    const r = va(edit((x) => {
+      x.segments[0].timing = parent;
+      x.segments[0].units = [{ text: '今天有点', granularity: 'word', timing: unit }];
+    }));
     checkIssues(r, label);
-    assert.match(textOf(r), /units|segments\[0\]/);
+    assert.match(pathsOf(r), /segments\[0\]\.units\[0\]\.timing/, `${label}: expected a unit path, got ${pathsOf(r)}`);
+    assert.match(textOf(r), /inside the parent segment/, `${label}: unexpected diagnosis ${textOf(r)}`);
   });
 }
 
@@ -185,6 +225,7 @@ const BAD = [
   ['unknown observation key', (x) => { x.observations[1].channel = 2; }, /channel|observations/],
   ['unknown score key', (x) => { x.observations[0].score.calibrated = true; }, /calibrated|score/],
   ['unknown capability key', (x) => { x.capabilities.emotion.note = 'x'; }, /note|emotion|capabilit/],
+  ['unknown capabilities container key', (x) => { x.capabilities.silence_detector = 'v1'; }, /silence_detector|capabilit/],
   ['schema_version 0.2', (x) => { x.schema_version = '0.2'; }, /schema_version/],
   ['missing required fields', (x) => { delete x.transcript; delete x.segments[1].timing;
     delete x.observations[1].source_model; delete x.capabilities.prosody; },
@@ -221,7 +262,6 @@ const BAD = [
   ['sparse segment_ids', (x) => { x.observations[0].segment_ids = new Array(2); }, /segment_ids|observations/],
   ['extra own array key', (x) => { x.segments.extra = 'x'; }, /segments|extra/],
   ['non-enumerable array key', (x) => { Object.defineProperty(x.observations, 'x', { value: 1 }); }, /observations/],
-  ['non-enumerable record field', (x) => { Object.defineProperty(x.segments[1], 'speaker_id', { value: 's' }); }, /speaker_id|segments\[1\]/],
   ['symbol record key', (x) => { Object.defineProperty(x, Symbol('s'), { value: 1 }); }, null],
   ['array subclass instance', (x) => { x.segments = Object.assign([structuredClone(x.segments[0])], {});
     Object.setPrototypeOf(x.segments, Object.create(Array.prototype)); }, /segments/],
@@ -230,6 +270,15 @@ for (const [label, apply, re] of BAD) test(`rejected: ${label}`, () => {
   const r = va(edit(apply));
   checkIssues(r, label);
   if (re) assert.match(textOf(r), re);
+});
+
+test('rejected: non-enumerable record field', () => {
+  const d = doc();
+  hideProp(d.segments[1], 'speaker_id', 'speaker-a');
+  assert.ok(isHidden(d.segments[1], 'speaker_id'), 'fixture is not actually non-enumerable');
+  const r = va(d);
+  checkIssues(r, 'non-enumerable record field');
+  assert.match(textOf(r), /speaker_id|segments\[1\]/);
 });
 
 let hits = 0;
@@ -252,6 +301,7 @@ for (const [label, apply] of ACCESSORS) test(`user getters never invoked: ${labe
   checkIssues(va(d), label);
   assert.equal(hits, 0, 'validator read an accessor property');
   assert.throws(() => serializeAnnotatedAudio(d, ASSET), (e) => e instanceof Error && e.message.length > 0);
+  assert.equal(hits, 0, 'failed serialization read an accessor property');
 });
 
 test('inherited fields and custom prototypes are rejected, plain JSON supported', () => {
@@ -274,10 +324,15 @@ const ASSET_BAD = [
   ['NaN duration', { ...ASSET, duration_ms: Number.NaN }], ['unsafe duration', { ...ASSET, duration_ms: 2 ** 53 }],
   ['zero sample_rate_hz', { ...ASSET, sample_rate_hz: 0 }], ['string channels', { ...ASSET, channels: 'mono' }],
   ['unknown storage path key', { ...ASSET, file_path: 'C:/tmp/a.wav' }],
-  ['non-enumerable field', Object.defineProperty({ ...ASSET }, 'asset_id', { value: 'x' })],
   ['symbol key', Object.defineProperty({ ...ASSET }, Symbol('s'), { value: 1 })],
 ];
 for (const [label, a] of ASSET_BAD) test(`validateAudioAsset rejects ${label}`, () => checkIssues(validateAudioAsset(a), label));
+
+test('validateAudioAsset rejects a non-enumerable field', () => {
+  const a = hideProp({ ...ASSET }, 'asset_id', 'x');
+  assert.ok(isHidden(a, 'asset_id'), 'fixture is not actually non-enumerable');
+  checkIssues(validateAudioAsset(a), 'non-enumerable asset field');
+});
 
 test('validateAudioAsset accepts real metadata and explicit nulls', () => {
   const r = validateAudioAsset(ASSET);
@@ -288,9 +343,17 @@ test('validateAudioAsset accepts real metadata and explicit nulls', () => {
 });
 
 test('asset argument is validated with the document', () => {
-  for (const a of [null, undefined, 'asset-1', [], { ...ASSET, media_type: 'video/mp4' },
-    { ...ASSET, duration_ms: 10 }, drop(ASSET, 'channels')]) checkIssues(va(doc(), a), 'bad asset argument');
+  const badAssets = [
+    ['null', null], ['explicit undefined', undefined], ['string', 'asset-1'], ['array', []],
+    ['video media_type', { ...ASSET, media_type: 'video/mp4' }],
+    ['duration shorter than the transcript', { ...ASSET, duration_ms: 10 }],
+    ['missing channels', drop(ASSET, 'channels')],
+  ];
+  for (const [label, a] of badAssets) {
+    checkIssues(validateAnnotatedAudio(doc(), a), `bad asset argument (${label})`);
+  }
   assert.equal(va(doc(), { ...ASSET, sample_rate_hz: null }).ok, true);
+  assert.equal(va(doc()).ok, true, 'omitted asset argument should fall back to the valid fixture');
 });
 
 test('parseAnnotatedAudio never throws on malformed input', () => {
