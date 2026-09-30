@@ -40,9 +40,6 @@ const configs = {
   approval_policy: 'never',
   // Official native fallback retains restricted-token workspace boundaries.
   'windows.sandbox': 'unelevated',
-  default_permissions: 'voicebot-coding',
-  'permissions.voicebot-coding.extends': ':workspace',
-  'permissions.voicebot-coding.filesystem.":workspace_roots"."**/*.env"': 'deny',
   'features.apps': false,
   'features.plugins': false,
   'model_providers.deepseek.name': 'DeepSeek official',
@@ -55,7 +52,7 @@ const configs = {
   'model_providers.deepseek.stream_max_retries': 1,
   'shell_environment_policy.exclude': ['DEEPSEEK_API_KEY'],
 };
-const args = ['exec', '--ignore-user-config', '--ephemeral', '--json', '--color', 'never', '-C', root, '-m', model];
+const args = ['exec', '--ignore-user-config', '--ephemeral', '--json', '--color', 'never', '-C', root, '-s', 'workspace-write', '-m', model];
 for (const [name, value] of Object.entries(configs)) args.push('-c', `${name}=${JSON.stringify(value)}`);
 args.push('-');
 const env = { ...process.env, DEEPSEEK_API_KEY: key };
