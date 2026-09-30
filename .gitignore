@@ -1,0 +1,21 @@
+# Local credentials
+.env
+.env.*
+!.env.example
+
+# Dependencies and generated files
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.venv/
+__pycache__/
+
+# Private audio, conversations, and coding-run artifacts
+data/
+.runtime/
+*.log
+
+# OS files
+Thumbs.db
+.DS_Store
