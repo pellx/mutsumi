@@ -2,7 +2,7 @@
 
 Read AGENTS.md and its required short architecture/flow documents. Only create apps/server/src/application/analysis-ports.ts in ONE write operation. Do not change other files, install packages, read .env, call providers or write Git. Avoid source exploration: the annotation public types are in its first 125 lines. This task only defines TypeScript interfaces, not implementations, mocks, HTTP or NestJS wiring. Aim for under 120 lines. Stop after saved-file read-back; supervisor commits and type-checks.
 
-Confirmed: manual complete-clip processing; Alibaba qwen3-asr-flash-filetrans asynchronous REST with text timing and sentence emotions; prototype Alibaba model-bound temporary storage now, owner-managed OSS later. Coding model is qwen3.8-flash, unrelated to runtime ASR. No live ASR acceptance yet.
+Confirmed: manual complete-clip processing; Alibaba qwen3-asr-flash-filetrans asynchronous REST with text timing and sentence emotions; prototype Alibaba model-bound temporary storage now, owner-managed OSS later. The previous Qwen CLI call failed at connection before any file edits. The owner now authorizes official DeepSeek fallback to implement this same task; coding provider is unrelated to runtime ASR. No live ASR acceptance yet.
 
 Import type AudioAsset and AnnotatedAudio from ../domain/annotation.js using NodeNext conventions (type-only import erased at runtime). Export the following exact names; use readonly request properties where appropriate:
 
