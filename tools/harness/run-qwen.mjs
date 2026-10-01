@@ -73,10 +73,17 @@ args.push('-');
 const env = { ...process.env, DASHSCOPE_API_KEY: key };
 delete env.DEEPSEEK_API_KEY;
 delete env.OPENAI_API_KEY;
+// Windows reqwest also discovers the user's system proxy without *_PROXY env
+// variables. That route failed for DashScope while direct HTTPS worked. Exempt
+// only the selected Alibaba host in this child; retain other inherited routes
+// and all sandbox/managed-network settings. No system proxy is modified.
+const proxyExceptions = [env.NO_PROXY, env.no_proxy, endpoint.hostname].filter(Boolean).join(',');
+env.NO_PROXY = proxyExceptions;
+env.no_proxy = proxyExceptions;
 const outputDir = path.join(root, '.runtime/harness-runs', new Date().toISOString().replaceAll(':', '-'));
 await mkdir(outputDir, { recursive: true });
 const child = spawn(executable, args, { cwd: root, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
-let stdout = '', stderr = '', progressBuffer = '', timedOut = false, overflow = false, cancelled = false;
+let stdout = '', stderr = '', progressBuffer = '', timedOut = false, overflow = false, cancelled = false, connectionFailed = false;
 const limit = 4 * 1024 * 1024;
 child.stdout.on('data', chunk => {
   stdout += chunk;
@@ -93,20 +100,28 @@ child.stdout.on('data', chunk => {
     } catch { /* Full redacted output is captured after completion. */ }
   }
 });
-child.stderr.on('data', chunk => { stderr += chunk; if (stderr.length > limit) { overflow = true; child.kill(); } });
+child.stderr.on('data', chunk => {
+  stderr += chunk;
+  if (stderr.length > limit) { overflow = true; child.kill(); return; }
+  if (!connectionFailed && (stderr.match(/stream connection failed/g) || []).length >= 2) {
+    connectionFailed = true;
+    console.log(JSON.stringify({ progress: 'connection_failure_limit' }));
+    child.kill();
+  }
+});
 child.stdin.on('error', () => {});
 const cancel = () => { cancelled = true; child.kill(); };
 process.once('SIGINT', cancel);
 process.once('SIGTERM', cancel);
 const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
 const completion = new Promise((resolve, reject) => { child.on('error', reject); child.on('close', (code, signal) => resolve({ code, signal })); });
-child.stdin.end(`Execute this brief. Read AGENTS.md first. Never read .env or enumerate environment variables. Do not delegate, discover connectors, edit unassigned files or call providers through shell. Stop after two identical infrastructure errors. For tracked files make exactly one edit patch; supervisor commits before the next edit.\n\n${prompt}`);
+child.stdin.end(`Execute only this brief. Read AGENTS.md first and the required flow/architecture. Never read .env or enumerate environment variables. Do not inspect data/ or .runtime artifacts outside the brief's explicit target path. Read only required context and assigned source/test files; no speculative workspace discovery. Do not delegate, discover connectors, edit unassigned files or call providers through shell. Stop after two identical infrastructure errors. Make exactly ONE successful write total; never re-edit, compact, format or fix the written file in this invocation. Supervisor commits before any next edit.\n\n${prompt}`);
 console.log(JSON.stringify({ status: 'started', model, effort, timeout_ms: timeoutMs, provider: endpoint.hostname, task }));
 let result;
 try { result = await completion; } finally { clearTimeout(timer); process.off('SIGINT', cancel); process.off('SIGTERM', cancel); }
 const events = stdout.split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(redact(line)); } catch { return { type: 'unparsed', text: redact(line) }; } });
-const report = { ...result, model, effort, timeout_ms: timeoutMs, provider: endpoint.hostname, cli: cli.stdout.trim(), task, timedOut, overflow, cancelled, events, stderr: redact(stderr) };
+const report = { ...result, model, effort, timeout_ms: timeoutMs, provider: endpoint.hostname, cli: cli.stdout.trim(), task, provider_direct: true, timedOut, overflow, cancelled, connectionFailed, events, stderr: redact(stderr) };
 const reportPath = path.join(outputDir, 'report.json');
 await writeFile(reportPath, JSON.stringify(report, null, 2));
-console.log(JSON.stringify({ ...result, model, timedOut, overflow, cancelled, report_path: reportPath, final_messages: events.filter(e => e.item?.type === 'agent_message').map(e => e.item.text), stderr: redact(stderr).slice(-3000) }));
-process.exitCode = result.code === 0 && !timedOut && !overflow && !cancelled ? 0 : 1;
+console.log(JSON.stringify({ ...result, model, timedOut, overflow, cancelled, connectionFailed, report_path: reportPath, final_messages: events.filter(e => e.item?.type === 'agent_message').map(e => e.item.text), stderr: redact(stderr).slice(-3000) }));
+process.exitCode = result.code === 0 && !timedOut && !overflow && !cancelled && !connectionFailed ? 0 : 1;
