@@ -1,0 +1,12 @@
+# M02 local storage acceptance repairs
+
+Qwen3.8-Flash, DeepSeek fallback D22. Read AGENTS.md, voice-system-flow.md, docs/architecture.md, docs/sleep-work-plan.md and ONLY apps/server/src/storage/file-audio-storage.ts; application/round-errors.ts public makeRoundError signature is already known. Modify ONLY the storage file in ONE write, no Git/launchers/secrets/cloud/discovery/other files. Supervisor commits. Independent QA found corrupt entries silently returned null; strict build also caught BlobPart variance. Do not claim acceptance until supervisor retests.
+
+Repair these focused defects while preserving interfaces and immutable-save semantics:
+- Blob: copy read.bytes using new Uint8Array(read.bytes) to an ArrayBuffer-backed view before new Blob; no unsafe type cast.
+- Constructor must reject non-string/empty/non-absolute rootDirectory with a safe owned invalid_input error rather than silently resolving arbitrary relative configuration. Trusted composition supplies an absolute configured data directory.
+- readById: null is ONLY for invalid UUID or genuinely absent root/asset/file (ENOENT). Root permission errors, non-directory/symlink assets/files, realpath containment mismatch, empty/oversized file, invalid JSON/schema/ID, truncated read and other corrupt/inconsistent entries throw owned storage_failed. Do not catch all realpath failures as null; distinguish ENOENT from real IO errors. No raw messages. Missing files can return null per this precise requirement.
+- Read a size-checked file through a handle in a bounded loop until its initially measured byte count is complete; reject premature EOF. Reject changed file size before returning (final handle.stat), never silently return a prefix after growth. Enforce <=maxBytes before allocation and after the read. Always close handles. Do not use unbounded readFile.
+- Before recursive cleanup, lstat the EXACT newly created pending directory, reject symlink/non-directory, realpath it, verify resolved absolute dirname is realRoot and basename has the pending prefix, then remove that verified resolved directory only. Unknown/missing cleanup targets are left alone; cleanup failure never masks the original safe failure.
+
+Build exact-once replacements in memory before one write; no wholesale formatting. Run node_modules/.bin/tsc.cmd --noEmit -p tsconfig.json, ensuring the shell propagates its actual exit code (do not hide it with a succeeding Write-Output). No adapter execution against data, no test-file writes. Report actual checks and commit suggestion.
