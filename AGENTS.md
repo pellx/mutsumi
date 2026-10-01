@@ -4,7 +4,7 @@
 
 - The human owner chooses product scope and, together with the supervising Codex agent, cloud providers/models and material tradeoffs.
 - The supervising Codex agent owns architecture, interfaces, path organization, task briefs, review, and acceptance.
-- Qwen3.8-Flash, invoked through Codex CLI, implements application code inside the approved task's file scope. The owner replaced DeepSeek on 2026-10-01; do not run further DeepSeek coding tasks. Historical DeepSeek briefs/reports describe prior work only. Do not silently replace the selected implementation model.
+- Application code is delegated through Codex CLI inside the approved task's file scope. Qwen3.8-Flash remains the preferred coding model; on 2026-10-01 the owner explicitly authorized falling back to official DeepSeek when Qwen fails. DeepSeek is therefore no longer prohibited; identify the actual implementer in reports and never substitute an unapproved provider. Runtime speech providers are independent of the coding provider.
 - Architecture and provider proposals are not approved merely because they appear in a document. Read `docs/decisions.md` for status before implementation.
 
 ## Scope and paths
