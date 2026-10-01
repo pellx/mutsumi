@@ -1,0 +1,5 @@
+# M03 conversation-store type and mode repair
+
+Edit ONLY apps/server/src/storage/file-conversation-store.ts, one write, no other file/Git. Read this file only; project context supplied. Initial implementation has TS2345 at ensureSessionDirectory(record.session_id) inside saveTurn's closure: capture the guarded session_id into a const before the asynchronous closure, then use that narrowed const. Do not cast away the error.
+
+Enforce session/mode consistency when saving and reading records: owner-live requires mode live, owner-development-mock requires mode development-mock. A mismatched save is owned invalid_input; a mismatched persisted read is owned storage_failed. Keep neutral config defaults, duplicate rejection, existing getTurn invalid-ID null behavior, atomic writes, queue, bounded reads and all other semantics unchanged. No compact/reformat or second write. Preassert anchors before replacement. npm run typecheck and report actual result. No private data, secrets or harness access. Supervisor runs independent persistence and mismatch cases before acceptance.
