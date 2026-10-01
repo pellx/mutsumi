@@ -92,14 +92,24 @@ export class FileAudioStorage implements AudioStoragePort {
 
   async readById(assetId: string): Promise<StoredAssetRead | null> {
     if (!isUuidV4(assetId)) return null;
-    return this.readAssetSafely(assetId);
+    try {
+      return await this.readAssetSafely(assetId);
+    } catch {
+      throw this.failed();
+    }
   }
 
   async readByKey(key: string, options: { readonly signal: AbortSignal }): Promise<Blob> {
     const { signal } = options;
     if (signal.aborted) throw this.cancelled();
     if (!isUuidV4(key)) throw this.invalid();
-    const read = await this.readAssetSafely(key);
+    let read: StoredAssetRead | null;
+    try {
+      read = await this.readAssetSafely(key);
+    } catch {
+      if (signal.aborted) throw this.cancelled();
+      throw this.failed();
+    }
     if (signal.aborted) throw this.cancelled();
     if (read === null) throw makeRoundError('not_found', 'storage');
     return new Blob([new Uint8Array(read.bytes)], { type: read.asset.media_type });
