@@ -26,7 +26,7 @@ const effort = effortOverride || settings.QWEN_REASONING_EFFORT || 'xhigh';
 if (!['low', 'medium', 'xhigh'].includes(effort)) throw new Error('Invalid Qwen reasoning effort');
 const timeoutOverride = process.argv.slice(3).find(arg => arg.startsWith('--timeout-ms='))?.slice('--timeout-ms='.length);
 const timeoutMs = timeoutOverride ? Number(timeoutOverride) : 300000;
-if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 600000) throw new Error('Timeout must be 1000..600000 milliseconds');
+if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 1200000) throw new Error('Timeout must be 1000..1200000 milliseconds');
 const executable = process.env.VOICEBOT_CODEX_BIN || 'codex';
 const cli = spawnSync(executable, ['--version'], { encoding: 'utf8', shell: false });
 if (cli.status !== 0) throw new Error('Codex CLI unavailable');
@@ -94,6 +94,9 @@ child.stdout.on('data', chunk => {
   for (const line of lines) {
     try {
       const event = JSON.parse(line);
+      if (event.item?.type === 'command_execution' && event.type === 'item.started') {
+        console.log(JSON.stringify({ progress: 'tool_started', command_preview: redact(String(event.item.command ?? '')).slice(0, 180) }));
+      }
       if (event.item?.type === 'command_execution' && event.type === 'item.completed') {
         console.log(JSON.stringify({ progress: 'tool_completed', exit_code: event.item.exit_code }));
       }
@@ -115,7 +118,7 @@ process.once('SIGINT', cancel);
 process.once('SIGTERM', cancel);
 const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
 const completion = new Promise((resolve, reject) => { child.on('error', reject); child.on('close', (code, signal) => resolve({ code, signal })); });
-child.stdin.end(`Execute only this brief. Read AGENTS.md first and the required flow/architecture. Never read .env or enumerate environment variables. Do not inspect data/ or .runtime artifacts outside the brief's explicit target path. Read only required context and assigned source/test files; no speculative workspace discovery. Do not delegate, discover connectors, edit unassigned files or call providers through shell. Stop after two identical infrastructure errors. Make exactly ONE successful write total; never re-edit, compact, format or fix the written file in this invocation. Supervisor commits before any next edit.\n\n${prompt}`);
+child.stdin.end(`Execute only this brief. Read AGENTS.md first and the required flow/architecture. Never read .env or enumerate environment variables. Do not inspect data/ or .runtime artifacts outside the brief's explicit target path. Read only required context and assigned source/test files; no speculative workspace discovery. Do not delegate, discover connectors, edit unassigned files or call providers through shell. Stop after two identical infrastructure errors. Make exactly ONE successful write total, to the assigned target only; never re-edit, compact, format or fix the written file in this invocation. Never create temporary test scripts or any other file for verification, even if you would delete it later. Use inline/in-memory verification or run existing tests directly with Node (node --test workers may be EPERM-blocked). Supervisor commits before any next edit.\n\n${prompt}`);
 console.log(JSON.stringify({ status: 'started', model, effort, timeout_ms: timeoutMs, provider: endpoint.hostname, task }));
 let result;
 try { result = await completion; } finally { clearTimeout(timer); process.off('SIGINT', cancel); process.off('SIGTERM', cancel); }
