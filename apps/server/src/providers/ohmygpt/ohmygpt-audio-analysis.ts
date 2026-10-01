@@ -297,6 +297,10 @@ function extractModelText(raw: string): EnvelopeText {
   const message = plainRecord(choice['message']);
   if (message === null) return { ok: false };
   if (message['role'] !== 'assistant') return { ok: false };
+  for (const key of ['tool_calls', 'function_call', 'refusal']) {
+    const value = message[key];
+    if (value !== undefined && value !== null) return { ok: false };
+  }
   const content = message['content'];
   if (typeof content !== 'string' || content.length === 0) return { ok: false };
   if (content.length > MAX_JSON_TEXT_CODE_UNITS) return { ok: false };
