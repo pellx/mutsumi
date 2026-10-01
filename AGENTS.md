@@ -33,6 +33,7 @@
 - Missing emotion, timestamps, or sound-event capability is explicitly unavailable/unknown, not fabricated data.
 - Planned speech timing differs from measured output timing. Never report a plan as a measured timestamp.
 - Provider mocks are for development and must be visibly identified. A passing mock path does not prove a live integration works.
+- Owner instruction on 2026-10-01: input audio for live integration, demonstrations, and acceptance must be human-recorded; do not use machine-synthesized speech. Use verifiable public recordings or owner-provided recordings, and include natural conversational speech, pauses, accents, and background noise as the usage-condition evaluation expands. Studio read speech alone does not establish performance under those conditions. Synthetic JSON/provider mocks only test structure and never count as real-audio acceptance.
 - Run the assigned module checks and report actual commands, outcomes, modified files, and remaining limitations. Do not claim unrun verification passed.
 - The supervisor independently reviews the diff and validates acceptance criteria. Completion requires supervisor acceptance, not just the implementer's final message.
 - Preserve sandbox and approval controls. If blocked, report the exact operation and reason rather than using unrestricted execution as a workaround.
