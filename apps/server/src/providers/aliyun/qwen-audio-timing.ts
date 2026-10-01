@@ -2,7 +2,7 @@ import type { AudioPublicationPort, RemoteAudioReference, StoredAudio, AnalysisF
 import type { TimingPort, UntimedTranscription } from '../../application/input-stage-ports.js';
 import { validateAnnotatedAudio, validateAudioAsset } from '../../domain/annotation.ts';
 import type { AnnotatedAudio, AudioAsset, Observation, TimedUnit } from '../../domain/annotation.ts';
-import { mapParaformerResult } from './filetrans-result.ts';
+import { inspectFiletransResult, mapParaformerResult } from './filetrans-result.ts';
 
 export const QWEN_AUDIO_TIMING_MODEL = 'qwen-audio-3.1-asr-flash-filetrans';
 const SUBMIT = 'https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription';
@@ -114,6 +114,19 @@ function mapReference(mapped: AnnotatedAudio, asset: AudioAsset, reference: Unti
 export function mapQwenAudioTimingResult(raw: unknown, asset: AudioAsset, reference: UntimedTranscription): AnnotatedAudio {
  const validAsset = validateAudioAsset(asset); if (!validAsset.ok) throw fail('invalid_audio', MSG.input);
  const validatedReference = validateReference(validAsset.value, reference);
+ const inspection = inspectFiletransResult(raw, validAsset.value);
+ if (inspection.ok && inspection.needs_calibration) {
+  const root = record(raw); const transcripts = root && Array.isArray(root.transcripts) ? root.transcripts : null;
+  const selected = transcripts && transcripts.length === 1 ? record(transcripts[0]) : null;
+  const sentences = selected && Array.isArray(selected.sentences) ? selected.sentences : null;
+  if (sentences && sentences.some(value => {
+   const sentence = record(value); const words = sentence && Array.isArray(sentence.words) ? sentence.words : null;
+   return !!words && words.some(wordValue => {
+    const word = record(wordValue); return !!word && typeof word.begin_time === 'number' && word.begin_time === word.end_time;
+   });
+  })) throw invalid();
+  throw fail('timing_unavailable', MSG.timing);
+ }
  const mapped = mapParaformerResult(raw, validAsset.value); if (!mapped.ok) throw mapped.error.code === 'timing_unavailable' ? fail('timing_unavailable', MSG.timing) : invalid();
  return mapReference(mapped.value, validAsset.value, validatedReference.reference);
 }
@@ -121,6 +134,7 @@ type Options = { apiKey: string; publication: AudioPublicationPort; timeoutMs?: 
 export class QwenAudioTiming implements TimingPort {
  readonly #key: string; readonly #publish: AudioPublicationPort['publish']; readonly #timeout: number; readonly #interval: number; readonly #polls: number; readonly #fetch: typeof fetch;
  constructor(options: Options) {
+  config(options !== null && options !== undefined);
   const timeout = options.timeoutMs ?? 150000, interval = options.pollIntervalMs ?? 1000, polls = options.maxPolls ?? 100;
   config(options !== null && options !== undefined && typeof options.apiKey === 'string' && !!options.apiKey && !CONTROL.test(options.apiKey) && !!options.publication && typeof options.publication.publish === 'function' && Number.isFinite(timeout) && Number.isInteger(timeout) && timeout > 0 && timeout <= MAX_TIMER && Number.isFinite(interval) && Number.isInteger(interval) && interval > 0 && interval <= MAX_TIMER && Number.isFinite(polls) && Number.isInteger(polls) && polls > 0 && polls <= 10000 && (options.fetch === undefined || typeof options.fetch === 'function'));
   this.#key = options.apiKey; this.#publish = options.publication.publish.bind(options.publication); this.#timeout = timeout; this.#interval = interval; this.#polls = polls; this.#fetch = options.fetch ?? globalThis.fetch;
@@ -131,6 +145,7 @@ export class QwenAudioTiming implements TimingPort {
    const assetCheck = validateAudioAsset(audio?.asset); if (!assetCheck.ok || !record(audio) || typeof audio.storage_key !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(audio.storage_key) || !record(transcription) || transcription.asset_id !== assetCheck.value.asset_id) throw fail('invalid_audio', MSG.input);
    const validatedReference = validateReference(assetCheck.value, transcription);
    let ref: UntimedTranscription; let stored: StoredAudio; try { ref = validatedReference.reference; stored = structuredClone(audio); } catch { throw fail('invalid_audio', MSG.input); }
+   const snapshotAsset = stored.asset;
    const contextText = validatedReference.contextText;
    check(d);
    let remote: RemoteAudioReference;
@@ -154,7 +169,7 @@ export class QwenAudioTiming implements TimingPort {
    }
    if (result === null) throw fail('timed_out',MSG.timeout);
    const raw = await this.#request(result,{method:'GET',redirect:'error',signal:d.signal},d,'invalid_result',2*1024*1024);
-   check(d); return mapQwenAudioTimingResult(raw, assetCheck.value, ref);
+   check(d); return mapQwenAudioTimingResult(raw, snapshotAsset, ref);
   } catch(e) { throw safe(e, fail('provider_failed', MSG.unexpected)); } finally { d.dispose(); }
  }
  async #request(url:string, init:RequestInit, d:Deadline, code: 'submission_failed'|'provider_failed'|'invalid_result', max=65536):Promise<unknown> {
