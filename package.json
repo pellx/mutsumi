@@ -8,12 +8,25 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "node --test tests/acceptance/annotation.test.mjs tests/acceptance/filetrans-result.test.mjs tests/acceptance/temporary-publication.test.mjs tests/acceptance/filetrans-analysis.test.mjs tests/acceptance/timing-calibration.test.mjs",
-    "typecheck": "tsc --noEmit --strict --allowImportingTsExtensions --target ES2022 --module NodeNext --moduleResolution NodeNext apps/server/src/domain/annotation.ts apps/server/src/application/analysis-ports.ts apps/server/src/providers/aliyun/filetrans-result.ts apps/server/src/providers/aliyun/temporary-publication.ts apps/server/src/providers/aliyun/filetrans-analysis.ts",
-    "check": "npm run typecheck && npm test",
+    "test": "node --test tests/acceptance/*.test.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run build && npm test",
+    "start": "node tools/run-server.mjs",
+    "start:mock": "node tools/run-server.mjs --mode=development-mock",
     "harness:check": "node tools/harness/run-qwen.mjs --check"
   },
+  "dependencies": {
+    "@nestjs/common": "12.1.2",
+    "@nestjs/core": "12.1.2",
+    "@nestjs/platform-express": "12.1.2",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
   "devDependencies": {
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "@types/node": "26.6.3",
+    "@types/express": "5.0.6",
+    "@types/multer": "2.3.0"
   }
 }
