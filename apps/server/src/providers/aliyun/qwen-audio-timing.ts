@@ -1,4 +1,5 @@
-import type { AudioPublicationPort, RemoteAudioReference, StoredAudio, TimingPort, UntimedTranscription, AnalysisFailure } from '../../application/analysis-ports.js';
+import type { AudioPublicationPort, RemoteAudioReference, StoredAudio, AnalysisFailure } from '../../application/analysis-ports.js';
+import type { TimingPort, UntimedTranscription } from '../../application/input-stage-ports.js';
 import { validateAnnotatedAudio, validateAudioAsset } from '../../domain/annotation.ts';
 import type { AnnotatedAudio, AudioAsset, Observation, TimedUnit } from '../../domain/annotation.ts';
 import { mapParaformerResult } from './filetrans-result.ts';
@@ -134,7 +135,7 @@ export class QwenAudioTiming implements TimingPort {
    if (remote.transport === 'oss-resource') headers['X-DashScope-OssResourceResolve'] = 'enable';
    const body = JSON.stringify({ model:QWEN_AUDIO_TIMING_MODEL, input:{file_urls:[remote.uri],context:[{role:'user',content:[{type:'input_text',text:contextText}]}]}, parameters:{channel_id:[0],keep_dialect:true} });
    const initial = await this.#request(SUBMIT,{method:'POST',headers,body,redirect:'error',signal:d.signal},d, 'submission_failed');
-   const taskRoot = record(initial); const output = taskRoot && record(taskRoot.output); const task = output?.task_id; if (typeof task !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(task)) throw fail('submission_failed', MSG.submit);
+   const taskRoot = record(initial); const output = taskRoot && record(taskRoot.output); const task = output?.task_id; if (!output) throw fail('submission_failed', MSG.submit); if (typeof task !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(task)) throw fail('submission_failed', MSG.submit);
    let status = output?.task_status; let result: string | null = null;
    if (status === 'SUCCEEDED') result = getResult(output); else if (status !== 'PENDING' && status !== 'RUNNING') throw fail('submission_failed', MSG.submit);
    for (let i=0; result === null && i<this.#polls; i++) {
