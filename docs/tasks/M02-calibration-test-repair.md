@@ -1,0 +1,12 @@
+# M02 repair calibration test fixtures and assertions — Qwen
+
+Only writable file: tests/acceptance/timing-calibration.test.mjs. Exactly ONE surgical write; supervisor immediately commits. No source file changes, private .env/data/.runtime, temporary files, cloud APIs, delegation, Git mutations or escalation. Read AGENTS.md, voice-system-flow.md, docs/architecture.md and this brief; additional reads only this target's helpers plus tests named below. Existing target is 467 lines. No other discovery. Owner requires Qwen only. Native PowerShell 7; keep the PATCH command under Windows 32KiB limit, use small in-memory exact-once replacement anchors accounting for LF/CRLF, assert all replacements before the one write.
+
+Independent review identified these test defects/gaps (product implementation remains unchanged):
+
+1. The `no configured port preserves strict safe errors` test uses qwenHelloSoft (zero-length first defect) but expects timing_unavailable, which is wrong. Exercise BOTH cases: existing zero fixture must reject invalid_result; a clone with sentence.words deleted must reject timing_unavailable. Each fresh mock/adapter submits exactly once. Do not weaken the product contract or remove this test.
+2. The `foreign thrown object` case currently rejects from mock fetch submission, which duplicates an old base test and does not check the NEW calibration boundary. Change this case to a successful Qwen soft-result mock, inject timingCalibration.calibrate rejecting the hostile getter object, and assert static invalid_result, getters code/message/cause never read, no sentinel leak, calibration exactly1 and submit exactly1. Keep all other error-boundary tests.
+3. The orchestration test named `each eligible defect calls calibration exactly once` currently covers only zero. Iterate named synthetic zero, words absent, words empty, and one endpoint missing; each run must independently assert exactly1 cal call/same asset/AbortSignal and exactly1 submission, positive calibrated output. Keep its human-readable failures.
+4. Add exact once-submission assertions to both timeout/caller-abort calibration cases; the timeout already asserts cal1. Do not add unrelated refactors.
+
+After the single write run node tests/acceptance/timing-calibration.test.mjs directly (no --test workers or temp scripts). If anything fails, report without re-editing. Report actual outcome and matching commit suggestion. User wants to inspect this bug repair before another module or push; do not begin new feature work.
