@@ -1,0 +1,18 @@
+# M02a — Separate storage and analysis ports
+
+Read AGENTS.md and its required short architecture/flow documents. Only create apps/server/src/application/analysis-ports.ts in ONE write operation. Do not change other files, install packages, read .env, call providers or write Git. Avoid source exploration: the annotation public types are in its first 125 lines. This task only defines TypeScript interfaces, not implementations, mocks, HTTP or NestJS wiring. Aim for under 120 lines. Stop after saved-file read-back; supervisor commits and type-checks.
+
+Confirmed: manual complete-clip processing; Alibaba qwen3-asr-flash-filetrans asynchronous REST with text timing and sentence emotions; prototype Alibaba model-bound temporary storage now, owner-managed OSS later. Coding model is qwen3.8-flash, unrelated to runtime ASR. No live ASR acceptance yet.
+
+Import type AudioAsset and AnnotatedAudio from ../domain/annotation.js using NodeNext conventions (type-only import erased at runtime). Export the following exact names; use readonly request properties where appropriate:
+
+- StoredAudio: asset: AudioAsset; storage_key: string. Key is an opaque server-internal identifier resolved by local storage, never a browser-controlled absolute path. It does not belong inside the strict AudioAsset schema.
+- RemoteAudioReference: uri: string; model: string; expires_at_ms: number | null; transport: 'https' | 'oss-resource'. This is server-internal capability-bearing data; never log it, return it to browser or include in dialogue context. Null expiry means unspecified, not infinite.
+- AudioPublicationPort: publish(audio: StoredAudio, options: {model: string; signal: AbortSignal}): Promise<RemoteAudioReference>. It uploads/resolves the opaque storage key. No ASR job submission. Temporary-storage and owned-OSS adapters implement the same port later. Caller passes supported ASR model; temporary uploads bind to that model. No delete guarantee: temporary provider doesn't expose deletion; lifetime policy stays adapter-specific.
+- AudioAnalysisPort: analyze(audio: AudioAsset, remote: RemoteAudioReference, options: {signal: AbortSignal}): Promise<AnnotatedAudio>. Adapter owns submit/poll/download/map, bounded waits, no blind retry of billed submission. This port does not upload local files or generate replies/TTS. Reject remote model mismatch before submitting. Missing measured text timing must be reported as an analysis failure for this first-version requirement, not accepted as complete success. Distinguish silent successful transcription with empty text and no units from missing timing on spoken units.
+- AnalysisFailureCode string union: 'invalid_audio' | 'publication_failed' | 'model_mismatch' | 'submission_failed' | 'provider_failed' | 'timed_out' | 'cancelled' | 'invalid_result' | 'timing_unavailable'.
+- AnalysisFailure plain type: code: AnalysisFailureCode; stage: 'publication' | 'transcription'; message: string; retryable: boolean. Safe messages only, no URL/signature/raw provider response/key. Future concrete adapters use this contract for error conversion; no custom Error class or runtime helpers here.
+
+Document units retain true provider granularity, sentence emotion is not independent per-character emotion, durations derive end-start, and unsupported prosody/sound-event capabilities remain unavailable. Native AbortSignal carries a shared operation deadline/cancellation; do not invent timer behavior in interfaces. No vendor SDK imports or secrets/config in this file.
+
+Report path, actual read-back check, limitations and a proposed commit message. This task does not establish a working cloud adapter or full M02 acceptance.
