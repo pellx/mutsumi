@@ -4,11 +4,11 @@ Approved decision: D20. Supervisor's original-waveform pilot passed, and the own
 
 ## Active step (only this file may be written in this invocation)
 
-Step: PORT.
+Step: MAPPER. Implement only the MAPPER deliverable in the fixed design below.
 
-Target: apps/server/src/application/analysis-ports.ts
+Target: apps/server/src/providers/aliyun/filetrans-result.ts
 
-Additional permitted reads: apps/server/src/domain/annotation.ts. Read AGENTS.md, voice-system-flow.md, docs/architecture.md and docs/decisions.md as required. No other source discovery is necessary.
+Additional permitted reads: apps/server/src/domain/annotation.ts, apps/server/src/application/analysis-ports.ts, tests/acceptance/filetrans-result.test.mjs. Read AGENTS.md, voice-system-flow.md, docs/architecture.md and docs/decisions.md as required. No other source discovery is necessary.
 
 Make exactly ONE successful file write. Do not commit; supervisor immediately commits the exact file before another edit. Read-back and one targeted verification are allowed; if they fail, report rather than re-edit. Do not open .env, data/ or .runtime; do not call cloud APIs, inspect secrets, delegate, push or change unrelated files. Latest owner-supplied agreement requires Qwen implementation; do not invoke DeepSeek.
 
