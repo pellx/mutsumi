@@ -1,0 +1,9 @@
+# Repair permanent conversation regression assertions
+
+Edit ONLY tests/acceptance/conversation-round.test.mjs once. No source/interface/other file change/Git/.env/data/.runtime/harness/network/private audio. Qwen primary; documents preloaded. Read target and only public RoundService methods/helpers if necessary. Use node:test/assert already present.
+
+Supervisor ran node --test target: 13 passed, 2 failed. First submit returns queued snapshot (while duplicate read may see processing); change ONLY first.status assertion in pending/busy test to queued, retaining busy throw and later terminal complete assertions. Remove the bare '/' from forbidden substrings because audio/wav is legitimate; retain storage_key, signed reference, filesystem URI/drive/path and PRIVATE leak checks. Do not weaken real failure assertions.
+
+Also repair the ineffective submitted-byte test: fixture currently received.push(Array.from(s.submission ? [] : [])) never captures bytes. Capture actual s.bytes AFTER the optional intake gate resolves, return captured-array access from harness. In caller-mutation test use explicit intake gate, mutate caller buf while held, release in finally, and assert captured byte snapshot remains [7,8,9]. Preserve independent public-job/record clone assertions. First completion test should record/verify the public port call order intake,analysis,persona,preferences,history,dialogue,synthesis,save; confirm actual order from public sequence if needed and make no source changes. Context test assert last-six user_text values are u2..u7, not just count.
+
+One physical write maximum including partial write; build full target content in memory before writing, command below30000chars. No append/second repair. Then node --test tests/acceptance/conversation-round.test.mjs; if sandbox worker spawn EPERM, node target is permissible in-process read-only equivalent, report actual result. Stop regardless success. Supervisor independently verifies and commits.
