@@ -262,6 +262,8 @@ type ServerConfig = {
   port: number;
   ffmpegBin: string | undefined;
   ffprobeBin: string | undefined;
+  analysisProvider: 'ohmygpt' | 'google';
+  ohmygptApiKey: string | undefined;
   geminiApiKey: string | undefined;
   freeTierConfirmed: boolean;
 };
@@ -311,16 +313,58 @@ function readPort(): number {
   return parsed;
 }
 
+function readAnalysisConfig(mode: RuntimeMode): {
+  analysisProvider: 'ohmygpt' | 'google';
+  ohmygptApiKey: string | undefined;
+  geminiApiKey: string | undefined;
+  freeTierConfirmed: boolean;
+} {
+  // Mock mode forces the harmless default and reads no cloud credential or free-flag variable.
+  if (mode !== 'live') {
+    return {
+      analysisProvider: 'ohmygpt',
+      ohmygptApiKey: undefined,
+      geminiApiKey: undefined,
+      freeTierConfirmed: false,
+    };
+  }
+
+  const providerValue = readEnv('MUTSUMI_ANALYSIS_PROVIDER') ?? 'ohmygpt';
+  if (providerValue !== 'ohmygpt' && providerValue !== 'google') {
+    throw new Error('MUTSUMI_ANALYSIS_PROVIDER must be "ohmygpt" or "google".');
+  }
+
+  if (providerValue === 'google') {
+    return {
+      analysisProvider: 'google',
+      ohmygptApiKey: undefined,
+      geminiApiKey: readEnv('GEMINI_API_KEY'),
+      freeTierConfirmed: readEnv('GEMINI_FREE_TIER_CONFIRMED') === 'true',
+    };
+  }
+
+  return {
+    analysisProvider: 'ohmygpt',
+    ohmygptApiKey: readEnv('OHMYGPT_API_KEY'),
+    geminiApiKey: undefined,
+    freeTierConfirmed: false,
+  };
+}
+
 function readServerConfig(): ServerConfig {
+  const mode = readMode();
+  const analysis = readAnalysisConfig(mode);
   return {
     projectRoot: readProjectRoot(),
     dataDirectory: readEnv('MUTSUMI_DATA_DIR'),
-    mode: readMode(),
+    mode,
     port: readPort(),
     ffmpegBin: readEnv('MUTSUMI_FFMPEG_BIN'),
     ffprobeBin: readEnv('MUTSUMI_FFPROBE_BIN'),
-    geminiApiKey: readEnv('GEMINI_API_KEY'),
-    freeTierConfirmed: readEnv('GEMINI_FREE_TIER_CONFIRMED') === 'true',
+    analysisProvider: analysis.analysisProvider,
+    ohmygptApiKey: analysis.ohmygptApiKey,
+    geminiApiKey: analysis.geminiApiKey,
+    freeTierConfirmed: analysis.freeTierConfirmed,
   };
 }
 
@@ -331,6 +375,8 @@ export async function bootstrap(): Promise<NestExpressApplication> {
     projectRoot: config.projectRoot,
     dataDirectory: config.dataDirectory,
     mode: config.mode,
+    analysisProvider: config.analysisProvider,
+    ohmygptApiKey: config.ohmygptApiKey,
     geminiApiKey: config.geminiApiKey,
     freeTierConfirmed: config.freeTierConfirmed,
     ffmpegBin: config.ffmpegBin,
