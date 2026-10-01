@@ -404,10 +404,10 @@ export class NativeAudioIntake implements AudioIntakePort {
 
     let workDirectory: string | null = null;
     try {
-      workDirectory = await this.createWorkDirectory();
+      workDirectory = await this.createWorkDirectory(signal);
+      assertLive(signal);
       const inputPath = join(workDirectory, 'input.bin');
       await writeFile(inputPath, input, { flag: 'wx', mode: 0o600 });
-      assertLive(signal);
 
       const probeBytes = await runAudioTool({
         executable: this.ffprobeBin,
@@ -471,7 +471,10 @@ export class NativeAudioIntake implements AudioIntakePort {
     }
   }
 
-  private async createWorkDirectory(): Promise<string> {
+  private async createWorkDirectory(signal: AbortSignal): Promise<string> {
+    assertLive(signal);
+    await mkdir(this.workDirectory, { recursive: true, mode: 0o700 });
+    assertLive(signal);
     const directory = join(this.workDirectory, `${WORK_PREFIX}${randomUUID()}`);
     await mkdir(directory, { recursive: false, mode: 0o700 });
     return directory;
