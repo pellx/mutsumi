@@ -437,6 +437,7 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
   #verifyAudio(check: InputCheck, blob: Blob): LoadedAudio {
     const size = blob.size;
     if (typeof size !== 'number' || !Number.isSafeInteger(size) || size <= 0) throw invalidAudio();
+    if (size > this.#maxBytes) throw invalidAudio();
     const blobType = typeof blob.type === 'string' ? blob.type.toLowerCase() : '';
     if (blobType !== check.mediaType) throw invalidAudio();
     return { key: check.key, mediaType: check.mediaType, extension: check.extension, blob };
@@ -494,9 +495,17 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
     }
     // Capture the arrival time before the body is read so a slow body download
     // cannot stretch the short-lived upload-credential window.
-    const acquiredAt = this.#readNow();
-    const raw = await readBoundedJson(response, MAX_POLICY_BYTES, deadline);
-    return buildPolicy(parsePolicy(raw), acquiredAt);
+    // Any failure here (clock, body read or payload checks) must still release
+    // the policy body best-effort without awaiting a cancellation that may never
+    // settle, then rethrow the original safe failure so cleanup cannot mask it.
+    try {
+      const acquiredAt = this.#readNow();
+      const raw = await readBoundedJson(response, MAX_POLICY_BYTES, deadline);
+      return buildPolicy(parsePolicy(raw), acquiredAt);
+    } catch (error: unknown) {
+      releaseBody(response);
+      throw error;
+    }
   }
 
   /** POST the multipart form to the policy host root without API authorization. */
