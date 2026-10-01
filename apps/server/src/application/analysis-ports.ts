@@ -89,3 +89,31 @@ export type AnalysisFailure = {
   message: string;
   retryable: boolean;
 };
+
+/**
+ * M02/D20 - independent timing calibration port.
+ *
+ * Provides word/character-level unit timing for the same original AudioAsset
+ * (same clock, same duration) via a separate analysis pass. The supervisor
+ * application wires this alongside the primary publication + analysis so that
+ * a single primary deadline covers both calls; the consuming mapper verifies
+ * lexical coverage, provenance and boundary compatibility before fusion.
+ *
+ * Contract:
+ * - Returns a validated AnnotatedAudio for the SAME asset_id/clock, carrying
+ *   supported positive unit timing. It does NOT mutate or re-interpret the
+ *   primary analysis result.
+ * - The port implementation must NOT introduce vendor SDK types, timers, or
+ *   inferred/interpolated times; it reports only independently measured or
+ *   provider-reported timing.
+ * - Cancellation is propagated via the supplied AbortSignal which carries the
+ *   primary analysis deadline.
+ * - A rejected or invalid result signals the mapper to fall through to the
+ *   existing failure path; this port never silently degrades.
+ */
+export type AudioTimingCalibrationPort = {
+  calibrate(
+    audio: AudioAsset,
+    options: { readonly signal: AbortSignal },
+  ): Promise<AnnotatedAudio>;
+};
