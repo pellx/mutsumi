@@ -21,7 +21,7 @@
  */
 
 import { validateAudioAsset } from '../../domain/annotation.ts';
-import type { AudioAsset, Observation } from '../../domain/annotation.ts';
+import type { AudioAsset } from '../../domain/annotation.ts';
 import type { StoredAudio } from '../../application/analysis-ports.ts';
 import type { TranscriptionPort, UntimedTranscription } from '../../application/input-stage-ports.ts';
 import { makeRoundError, toRoundFailure } from '../../application/round-errors.ts';
@@ -307,7 +307,7 @@ export class OhMyGptTranscription implements TranscriptionPort {
   ) => Promise<Blob>;
   private readonly fetchImpl: typeof globalThis.fetch;
 
-  constructor(config: OhMyGptAudioAnalysisConfig) {
+  constructor(config: OhMyGptTranscriptionConfig) {
     const candidate: unknown = config;
     if (candidate === null || typeof candidate !== 'object') {
       throw new Error('OhMyGptTranscription requires a configuration object');
@@ -365,7 +365,7 @@ export class OhMyGptTranscription implements TranscriptionPort {
       if (!envelope.ok) throw owned('invalid_result');
       const mapped = parseTranscription(envelope.text);
       if (mapped === null) throw owned('invalid_result');
-      const events: Observation[] = mapped.events.map((label, index) => ({ observation_id: 'sound-' + (index + 1), kind: 'sound_event', label, timing: { status: 'unavailable', reason: 'model supplied no event alignment' }, source_provider: 'google', source_model: GEMINI_AUDIO_MODEL }));
+      const events: UntimedTranscription['sound_events'][number][] = mapped.events.map((label, index) => ({ observation_id: 'sound-' + (index + 1), kind: 'sound_event', label, timing: { status: 'unavailable', reason: 'model supplied no event alignment' }, source_provider: 'google', source_model: GEMINI_AUDIO_MODEL }));
       return { asset_id: asset.asset_id, transcript: mapped.transcript, source_provider: 'google', source_model: GEMINI_AUDIO_MODEL, sound_events: events, sound_event_capability: { status: 'ok', source_provider: 'google', source_model: GEMINI_AUDIO_MODEL } };
     } catch (error) {
       if (controller.signal.aborted) {
