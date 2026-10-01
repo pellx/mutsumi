@@ -49,7 +49,7 @@ ol{list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:8px}
 li[data-stage]{flex:0 1 auto; min-width:0; border:1px solid var(--line); border-radius:8px;
   padding:6px 12px; background:var(--green-soft); color:var(--green-ink); font-size:.9rem}
 li[data-stage="complete"]{background:var(--surface)}
-audio{display:block; width:100%; max-width:100%; height:auto; margin:6px 0 14px}
+audio{display:block; width:100%; max-width:100%; height:54px; margin:6px 0 14px}
 #transcript{background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px; min-width:0}
 #token-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(84px,1fr));
   gap:8px; margin:6px 0 14px; min-width:0}
