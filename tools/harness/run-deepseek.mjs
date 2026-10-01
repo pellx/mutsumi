@@ -13,7 +13,9 @@ const relative = path.relative(taskRoot, taskPath);
 if (relative.startsWith('..') || path.isAbsolute(relative) || !relative.endsWith('.md')) {
   throw new Error('Task must be a Markdown file inside docs/tasks');
 }
-const prompt = 'The supervisor performs the immediate per-file Git commit required by AGENTS.md. Never run Git mutations or invoke tools/harness, harness:check, launchers or credential-reading scripts. Make the one assigned file write, run only the specified read-only checks, report and stop.\n\n' + await readFile(taskPath, 'utf8');
+const contextNames = ['AGENTS.md', 'voice-system-flow.md', 'docs/architecture.md', 'docs/sleep-work-plan.md'];
+const context = await Promise.all(contextNames.map(async name => `## Preloaded context: ${name}\n${await readFile(path.join(root, name), 'utf8')}`));
+const prompt = 'The supervisor performs the immediate per-file Git commit required by AGENTS.md. Never run Git mutations or invoke tools/harness, harness:check, launchers or credential-reading scripts. The four required context documents are supplied completely below; read them here before editing and do not reopen or search them through tools. Next read only assigned source dependencies. Make the one assigned file write, run only the specified read-only checks, report and stop.\n\n' + context.join('\n\n') + '\n\n## Assigned task\n' + await readFile(taskPath, 'utf8');
 const selected = {};
 for (const line of (await readFile(path.join(root, '.env'), 'utf8')).split(/\r?\n/)) {
   const match = line.match(/^\s*(DEEPSEEK_API_KEY|DEEPSEEK_BASE_URL|DEEPSEEK_MODEL)\s*=\s*(.*?)\s*$/);
