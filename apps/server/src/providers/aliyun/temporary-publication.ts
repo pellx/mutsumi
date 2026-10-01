@@ -15,17 +15,21 @@
  * - The policy bearer credential is stored in a `#` field and is only ever sent
  *   to the DashScope upload-policy endpoint, never to OSS.
  * - A single combined `AbortSignal` (caller cancellation plus this adapter's
- *   own deadline) races the local reader and every HTTP/body wait, so an
- *   injected dependency that ignores its signal cannot leave `publish` pending.
+ *   own deadline) races the local reader, both HTTP requests and every body
+ *   read, so an injected dependency that ignores its signal cannot leave
+ *   `publish` pending. Body release is best-effort and never awaited, so
+ *   cancellation cleanup cannot extend or block the publication deadline.
+ * - The policy response arrival time is captured before its body is read, its
+ *   short upload-credential TTL is re-checked immediately before the POST, and
+ *   the returned expiry is a separate conservative prototype media-lifetime
+ *   estimate (48h).
  * - Returned failure objects match `AnalysisFailure` (stage `publication`),
  *   carry static safe messages, never a cause, body, URL or key value, and are
  *   always `retryable: false`; the caller controls explicit retries.
- * - The returned expiry is a conservative prototype media-lifetime estimate
- *   (48h), not the short upload-credential TTL.
  */
 
 import type { AudioPublicationPort, RemoteAudioReference, StoredAudio } from '../../application/analysis-ports.js';
-import { validateAudioAsset } from '../../domain/annotation.js';
+import { validateAudioAsset } from '../../domain/annotation.ts';
 import { FILETRANS_MODEL } from './filetrans-result.ts';
 
 /** Fixed approved DashScope upload-policy endpoint (Beijing). */
@@ -36,6 +40,9 @@ const MAX_POLICY_BYTES = 64 * 1024;
 
 /** Conservative prototype media lifetime used for the returned expiry estimate. */
 const MEDIA_LIFETIME_MS = 48 * 60 * 60 * 1000;
+
+/** Largest accepted timeout: the native timer range cannot overflow or wrap. */
+const MAX_TIMER_MS = 2147483647;
 
 /** Exact OSS host suffix allowed for the upload target. */
 const OSS_HOST_SUFFIX = '.oss-cn-beijing.aliyuncs.com';
@@ -61,23 +68,12 @@ const MEDIA_EXTENSION: ReadonlyMap<string, string> = new Map<string, string>([
   ['audio/aac', 'aac'],
 ]);
 
-const EXTENSION_MEDIA_TYPE: ReadonlyMap<string, string> = new Map<string, string>([
-  ['wav', 'audio/wav'],
-  ['mp3', 'audio/mpeg'],
-  ['flac', 'audio/flac'],
-  ['ogg', 'audio/ogg'],
-  ['m4a', 'audio/mp4'],
-  ['webm', 'audio/webm'],
-  ['aac', 'audio/aac'],
-]);
-
 const BLOB_CLASS = globalThis.Blob;
 const ABORT_CONTROLLER_CLASS = globalThis.AbortController;
 
 const CONFIG_MESSAGE = 'invalid temporary publication configuration';
 const INVALID_AUDIO_MESSAGE = 'audio asset is not a valid publication input';
 const INVALID_KEY_MESSAGE = 'storage key is not an accepted opaque identifier';
-const INVALID_BLOB_MESSAGE = 'stored audio is not a publishable blob for this asset';
 const MODEL_MISMATCH_MESSAGE = 'requested model is not supported by this publication adapter';
 const CANCELLED_MESSAGE = 'audio publication was cancelled by the caller';
 const TIMED_OUT_MESSAGE = 'audio publication exceeded its time budget';
@@ -112,12 +108,16 @@ type Deadline = {
   readonly dispose: () => void;
 };
 
-type Preflight = {
+/** Input facts known before the asset is read (no blob yet). */
+type InputCheck = {
   readonly key: string;
   readonly mediaType: string;
-  readonly bytesLimit: number;
-  readonly blob: Blob;
   readonly extension: string;
+};
+
+/** Input facts plus the real blob confirmed by the post-read checks. */
+type LoadedAudio = InputCheck & {
+  readonly blob: Blob;
 };
 
 type UploadPolicy = {
@@ -131,9 +131,11 @@ type UploadPolicy = {
   readonly maxBytes: number;
   readonly ttlMs: number;
   readonly acquiredAt: number;
+  readonly mediaExpiresAt: number;
 };
 
 type FetchLike = typeof globalThis.fetch;
+type FetchInit = Parameters<FetchLike>[1];
 
 /**
  * Internal marked error. `message` is static and safe; it never embeds a URL,
@@ -162,10 +164,6 @@ function isPlainRecord(value: unknown): value is PlainRecord {
 
 function readField(record: PlainRecord, key: string): unknown {
   return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {
@@ -228,10 +226,18 @@ function createDeadline(caller: AbortSignal, timeoutMs: number): Deadline {
     clearTimeout(timer);
     caller.removeEventListener('abort', onCallerAbort);
   };
-  return { signal: controller.signal, timedOut: () => expired, dispose };
+  return {
+    signal: controller.signal,
+    timedOut: () => expired,
+    dispose,
+  };
 }
 
-/** Throw the distinguished cancellation/deadline failure when the combined signal has fired. */
+/**
+ * Throw the distinguished caller-cancellation or own-deadline failure when the
+ * combined signal has fired. Which one it is comes from the deadline's own timer
+ * flag, never from inspecting an arbitrary external error.
+ */
 function throwIfAborted(deadline: Deadline): void {
   if (!deadline.signal.aborted) return;
   throw deadline.timedOut() ? timedOut() : cancelled();
@@ -239,23 +245,26 @@ function throwIfAborted(deadline: Deadline): void {
 
 /**
  * Race an operation against the combined signal so a dependency that ignores its
- * signal cannot leave the caller pending. The losing operation keeps its own
- * settlement and is observed here to avoid an unhandled rejection.
+ * signal cannot leave the caller pending. The abort listener is removed on both
+ * the abort and the normal settlement paths, and the losing promise always keeps
+ * an attached rejection handler so it cannot surface as an unhandled rejection.
+ * External exceptions are mapped to the static publication failure; they are
+ * never re-classified by inspecting a foreign `Error.name`.
  */
 function raceAbort<T>(operation: Promise<T>, deadline: Deadline): Promise<T> {
   const signal = deadline.signal;
   if (signal.aborted) {
-    operation.catch(() => undefined);
+    operation.then(undefined, () => undefined);
     throw deadline.timedOut() ? timedOut() : cancelled();
   }
   return new Promise<T>((resolve, reject) => {
-    const settle = (): void => {
+    const onAbort = (): void => {
       reject(deadline.timedOut() ? timedOut() : cancelled());
     };
-    signal.addEventListener('abort', settle, { once: true });
+    signal.addEventListener('abort', onAbort, { once: true });
     operation.then(
       (value) => {
-        signal.removeEventListener('abort', settle);
+        signal.removeEventListener('abort', onAbort);
         if (signal.aborted) {
           reject(deadline.timedOut() ? timedOut() : cancelled());
           return;
@@ -263,31 +272,15 @@ function raceAbort<T>(operation: Promise<T>, deadline: Deadline): Promise<T> {
         resolve(value);
       },
       (error: unknown) => {
-        signal.removeEventListener('abort', settle);
+        signal.removeEventListener('abort', onAbort);
         if (signal.aborted) {
           reject(deadline.timedOut() ? timedOut() : cancelled());
           return;
         }
-        if (isPublicationError(error)) {
-          reject(error);
-          return;
-        }
-        if (isAbortError(error)) {
-          reject(cancelled());
-          return;
-        }
-        reject(publicationFailed());
+        reject(isPublicationError(error) ? error : publicationFailed());
       },
     );
   });
-}
-
-/** Detect an abort error without reading arbitrary host properties. */
-function isAbortError(value: unknown): boolean {
-  if (typeof value !== 'object' || value === null) return false;
-  if (!(value instanceof Error)) return false;
-  const name: unknown = value.name;
-  return name === 'AbortError' || name === 'TimeoutError';
 }
 
 /** Read a `number | decimal-numeric-string` policy field; never a general coercion. */
@@ -319,14 +312,18 @@ function validateUploadHost(value: string): void {
   if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(bucket) === false) throw publicationFailed();
 }
 
-/** Validate a safe slash-separated OSS object prefix (empty allowed). */
+/**
+ * Validate a safe nonempty slash-separated OSS object prefix: no leading or
+ * trailing slash, no empty/`.`/`..` segment, no backslash and no control char.
+ * Object keys are then built by explicit slash joining, so the prefix format is
+ * never inferred from separator guessing.
+ */
 function validateUploadDir(value: string): void {
+  if (value.length === 0) throw publicationFailed();
   if (hasControlChar(value)) throw publicationFailed();
   if (value.includes('\\')) throw publicationFailed();
-  if (value.length === 0) return;
-  if (value.startsWith('/')) throw publicationFailed();
-  const segments = value.endsWith('/') ? value.slice(0, -1).split('/') : value.split('/');
-  for (const segment of segments) {
+  if (value.startsWith('/') || value.endsWith('/')) throw publicationFailed();
+  for (const segment of value.split('/')) {
     if (segment.length === 0) throw publicationFailed();
     if (segment === '.' || segment === '..') throw publicationFailed();
   }
@@ -369,7 +366,9 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
     const readAudio = options.readAudio;
     if (typeof readAudio !== 'function') throw new Error(CONFIG_MESSAGE);
     if (!isPositiveSafeInteger(options.maxBytes)) throw new Error(CONFIG_MESSAGE);
-    if (!isPositiveSafeInteger(options.timeoutMs)) throw new Error(CONFIG_MESSAGE);
+    if (!isPositiveSafeInteger(options.timeoutMs) || options.timeoutMs > MAX_TIMER_MS) {
+      throw new Error(CONFIG_MESSAGE);
+    }
     if (options.fetch !== undefined && typeof options.fetch !== 'function') {
       throw new Error(CONFIG_MESSAGE);
     }
@@ -394,13 +393,13 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
   ): Promise<RemoteAudioReference> {
     const deadline = createDeadline(options.signal, this.#timeoutMs);
     try {
-      const preflight = this.#validateInput(audio);
+      const check = this.#validateInput(audio);
       if (options.model !== FILETRANS_MODEL) throw modelMismatch();
       throwIfAborted(deadline);
-      const blob = await this.#loadAudio(preflight.key, deadline);
-      const checked = this.#verifyAudio(preflight, blob);
+      const blob = await this.#loadAudio(check.key, deadline);
+      const loaded = this.#verifyAudio(check, blob);
       throwIfAborted(deadline);
-      const reference = await this.#runPublish(checked, deadline);
+      const reference = await this.#runPublish(loaded, deadline);
       throwIfAborted(deadline);
       return reference;
     } catch (error: unknown) {
@@ -411,7 +410,7 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
   }
 
   /** Reject an invalid asset, key and unsupported media type before any read or request. */
-  #validateInput(audio: StoredAudio): Preflight {
+  #validateInput(audio: StoredAudio): InputCheck {
     if (!isPlainRecord(audio)) throw invalidAudio();
     const validated = validateAudioAsset(audio.asset);
     if (!validated.ok) throw invalidAudio();
@@ -422,13 +421,7 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
     if (typeof key !== 'string' || !STORAGE_KEY_PATTERN.test(key)) {
       throw new PublicationError('invalid_audio', INVALID_KEY_MESSAGE);
     }
-    return {
-      key,
-      mediaType,
-      extension,
-      bytesLimit: this.#maxBytes,
-      blob: undefined as unknown as Blob,
-    };
+    return { key, mediaType, extension };
   }
 
   /** Read through the injected reader, racing it against the combined signal. */
@@ -440,29 +433,24 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
     return blob;
   }
 
-  /** Confirm the read blob is nonempty, within limits and the declared media type. */
-  #verifyAudio(preflight: Preflight, blob: Blob): Preflight {
+  /** Confirm the read blob is nonempty and matches the declared media type. */
+  #verifyAudio(check: InputCheck, blob: Blob): LoadedAudio {
     const size = blob.size;
     if (typeof size !== 'number' || !Number.isSafeInteger(size) || size <= 0) throw invalidAudio();
-    if (size > preflight.bytesLimit) throw invalidAudio();
     const blobType = typeof blob.type === 'string' ? blob.type.toLowerCase() : '';
-    if (blobType !== preflight.mediaType) throw invalidAudio();
-    return {
-      key: preflight.key,
-      mediaType: preflight.mediaType,
-      bytesLimit: preflight.bytesLimit,
-      blob,
-      extension: preflight.extension,
-    };
+    if (blobType !== check.mediaType) throw invalidAudio();
+    return { key: check.key, mediaType: check.mediaType, extension: check.extension, blob };
   }
 
-  /** Retrieve the upload policy, upload the file, and build the reference. */
-  async #runPublish(preflight: Preflight, deadline: Deadline): Promise<RemoteAudioReference> {
+  /** Retrieve the upload policy, enforce the effective size limit, upload, build the reference. */
+  async #runPublish(audio: LoadedAudio, deadline: Deadline): Promise<RemoteAudioReference> {
     const policy = await this.#requestPolicy(deadline);
     throwIfAborted(deadline);
+    const sizeLimit = Math.min(this.#maxBytes, policy.maxBytes);
+    if (audio.blob.size > sizeLimit) throw invalidAudio();
     const objectId = this.#generateObjectId();
-    const objectKey = `${policy.uploadDir}${objectId}.${preflight.extension}`;
-    const uploadUrl = `${new URL(policy.uploadHost).origin}/${objectKey}`;
+    const objectKey = `${policy.uploadDir}/${objectId}.${audio.extension}`;
+    const uploadUrl = `${new URL(policy.uploadHost).origin}/`;
     const form = new FormData();
     form.append('OSSAccessKeyId', policy.ossAccessKeyId);
     form.append('Signature', policy.signature);
@@ -471,14 +459,11 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
     form.append('x-oss-forbid-overwrite', policy.forbidOverwrite);
     form.append('key', objectKey);
     form.append('success_action_status', '200');
-    form.append('file', preflight.blob, `${objectId}.${preflight.extension}`);
+    form.append('file', audio.blob, `${objectId}.${audio.extension}`);
     this.#assertPolicyFresh(policy);
     throwIfAborted(deadline);
-    const httpError = await this.#postUpload(uploadUrl, form, deadline);
-    if (httpError) throw publicationFailed();
-    throwIfAborted(deadline);
-    const expiresAt = policy.expiresAt;
-    if (!Number.isSafeInteger(expiresAt)) throw publicationFailed();
+    await this.#postUpload(uploadUrl, form, deadline);
+    const expiresAt = policy.mediaExpiresAt;
     return {
       uri: `oss://${objectKey}`,
       model: FILETRANS_MODEL,
@@ -490,8 +475,9 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
   /** GET the upload policy with a bounded body read and abort-aware waits. */
   async #requestPolicy(deadline: Deadline): Promise<UploadPolicy> {
     const url = `${UPLOAD_POLICY_URL}?action=getPolicy&model=${encodeURIComponent(FILETRANS_MODEL)}`;
-    const response = await raceAbort(
-      this.#fetch(url, {
+    const response = await this.#fetchGuarded(
+      url,
+      {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${this.#apiKey}`,
@@ -499,27 +485,46 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
         },
         redirect: 'error',
         signal: deadline.signal,
-      }),
+      },
       deadline,
     );
-    if (response.status !== 200) throw publicationFailed();
-    throwIfAborted(deadline);
-    const raw = await readBoundedJson(response, MAX_POLICY_BYTES, deadline);
+    if (response.status !== 200) {
+      releaseBody(response);
+      throw publicationFailed();
+    }
+    // Capture the arrival time before the body is read so a slow body download
+    // cannot stretch the short-lived upload-credential window.
     const acquiredAt = this.#readNow();
-    const policy = buildPolicy(parsePolicy(raw), acquiredAt, preflightLimit(preflightOf(deadline)));
-    return policy;
+    const raw = await readBoundedJson(response, MAX_POLICY_BYTES, deadline);
+    return buildPolicy(parsePolicy(raw), acquiredAt);
   }
 
-  /** POST the multipart form to the policy host without API authorization. */
-  async #postUpload(url: string, form: FormData, deadline: Deadline): Promise<boolean> {
-    const response = await raceAbort(
-      this.#fetch(url, { method: 'POST', body: form, redirect: 'error', signal: deadline.signal }),
+  /** POST the multipart form to the policy host root without API authorization. */
+  async #postUpload(url: string, form: FormData, deadline: Deadline): Promise<void> {
+    const response = await this.#fetchGuarded(
+      url,
+      { method: 'POST', body: form, redirect: 'error', signal: deadline.signal },
       deadline,
     );
-    await discardBody(response);
-    if (response.status !== 200) return true;
+    releaseBody(response);
+    if (response.status !== 200) throw publicationFailed();
     throwIfAborted(deadline);
-    return false;
+  }
+
+  /**
+   * Fetch while racing the combined signal. A response that arrives only after
+   * the deadline fired has no caller left to consume it, so its body is released
+   * best-effort instead of being left half-read.
+   */
+  async #fetchGuarded(url: string, init: FetchInit, deadline: Deadline): Promise<Response> {
+    const pending = this.#fetch(url, init);
+    pending.then(
+      (response) => {
+        if (deadline.signal.aborted) releaseBody(response);
+      },
+      () => undefined,
+    );
+    return raceAbort(pending, deadline);
   }
 
   #readNow(): number {
@@ -544,20 +549,12 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
     return value;
   }
 
+  /** Reject a rewound clock or an expired upload credential immediately before the POST. */
   #assertPolicyFresh(policy: UploadPolicy): void {
     const now = this.#readNow();
+    if (now < policy.acquiredAt) throw publicationFailed();
     if (now - policy.acquiredAt >= policy.ttlMs) throw publicationFailed();
   }
-}
-
-/** Placeholder kept trivial; the configured limit is folded in during preflight. */
-function preflightOf(_deadline: Deadline): number {
-  return 0;
-}
-
-/** Clamp the configured limit with the policy-declared byte limit. */
-function preflightLimit(_configured: number): number {
-  return 0;
 }
 
 /** Read at most `maxBytes` from the response body and return the decoded JSON text. */
@@ -568,29 +565,37 @@ async function readBoundedJson(
 ): Promise<string> {
   const declared = response.headers.get('content-length');
   if (declared !== null) {
+    if (!/^[0-9]+$/.test(declared)) {
+      releaseBody(response);
+      throw publicationFailed();
+    }
     const parsed = Number(declared);
-    if (Number.isFinite(parsed) && parsed > maxBytes) throw publicationFailed();
+    if (!Number.isSafeInteger(parsed) || parsed > maxBytes) {
+      releaseBody(response);
+      throw publicationFailed();
+    }
   }
   const body = response.body;
-  if (body === null || typeof body.getReader !== 'function') throw publicationFailed();
+  if (body === null || typeof body.getReader !== 'function') {
+    releaseBody(response);
+    throw publicationFailed();
+  }
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  for (;;) {
-    const step = await raceAbort(reader.read(), deadline);
-    if (step.done === true) break;
-    const chunk = step.value;
-    if (!(chunk instanceof Uint8Array)) throw publicationFailed();
-    total += chunk.byteLength;
-    if (total > maxBytes) {
-      try {
-        await reader.cancel();
-      } catch {
-        /* body already released */
-      }
-      throw publicationFailed();
+  try {
+    for (;;) {
+      const step = await raceAbort(reader.read(), deadline);
+      if (step.done === true) break;
+      const chunk = step.value;
+      if (!(chunk instanceof Uint8Array)) throw publicationFailed();
+      total += chunk.byteLength;
+      if (total > maxBytes) throw publicationFailed();
+      chunks.push(chunk);
     }
-    chunks.push(chunk);
+  } catch (error: unknown) {
+    releaseReader(reader);
+    throw error;
   }
   throwIfAborted(deadline);
   const bytes = new Uint8Array(total);
@@ -602,19 +607,32 @@ async function readBoundedJson(
   return new TextDecoder().decode(bytes);
 }
 
-/** Cancel or consume a response body without buffering it. */
-async function discardBody(response: Response): Promise<void> {
+/**
+ * Best-effort, nonblocking release of a response body. Cleanup is never awaited
+ * so a body that never settles cannot hang or extend the publication deadline;
+ * the rejection is still observed to avoid an unhandled rejection.
+ */
+function releaseBody(response: Response): void {
   const body = response.body;
   if (body === null) return;
   try {
-    await body.cancel();
+    body.cancel().then(undefined, () => undefined);
   } catch {
-    /* body already consumed or locked */
+    /* body already locked or consumed; nothing further to release */
+  }
+}
+
+/** Best-effort, nonblocking abort of a partially read stream. */
+function releaseReader(reader: { cancel: () => Promise<void> }): void {
+  try {
+    reader.cancel().then(undefined, () => undefined);
+  } catch {
+    /* stream already closed or locked */
   }
 }
 
 /** Validate and normalize the policy payload into an internal record. */
-function buildPolicy(data: PlainRecord, acquiredAt: number, _limit: number): UploadPolicy {
+function buildPolicy(data: PlainRecord, acquiredAt: number): UploadPolicy {
   const policy = readPolicyNonEmpty(data, 'policy');
   const signature = readPolicyNonEmpty(data, 'signature');
   const uploadDir = readPolicyNonEmpty(data, 'upload_dir');
@@ -636,6 +654,8 @@ function buildPolicy(data: PlainRecord, acquiredAt: number, _limit: number): Upl
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw publicationFailed();
   const ttlMs = ttlSeconds * 1000;
   if (!Number.isSafeInteger(ttlMs)) throw publicationFailed();
+  const mediaExpiresAt = acquiredAt + MEDIA_LIFETIME_MS;
+  if (!Number.isSafeInteger(mediaExpiresAt)) throw publicationFailed();
   return {
     policy,
     signature,
@@ -647,6 +667,7 @@ function buildPolicy(data: PlainRecord, acquiredAt: number, _limit: number): Upl
     maxBytes,
     ttlMs,
     acquiredAt,
+    mediaExpiresAt,
   };
 }
 
@@ -657,4 +678,3 @@ function toFailure(error: unknown): PublicationFailure {
 }
 
 export type { PublicationFailure };
-
