@@ -150,6 +150,15 @@ test('invalid measured times are invalid_result without coercion', () => {
 });
 test('malformed structure is invalid_result', () => {
   const base = t0([S()]);
+  // Fixture sanity: this case must contradict the speech contract (one channel-0
+  // transcript with nonempty text and zero sentences), not merely omit the root
+  // `transcripts` wrapper.
+  const noSentencesTranscript = t0([]);
+  assert.equal(noSentencesTranscript.channel_id, 0, 'fixture sanity: channel 0');
+  assert.ok(typeof noSentencesTranscript.text === 'string' && noSentencesTranscript.text.length > 0, 'fixture sanity: nonempty text');
+  assert.deepEqual(noSentencesTranscript.sentences, [], 'fixture sanity: zero sentences');
+  const noSentences = { transcripts: [noSentencesTranscript] };
+  assert.equal(noSentences.transcripts.length, 1, 'fixture sanity: exactly one transcript');
   const cases = {
     'null root': null,
     'primitive root': 42,
@@ -165,7 +174,7 @@ test('malformed structure is invalid_result', () => {
     'channel absent': { transcripts: [drop(base, 'channel_id')] },
     'text absent': { transcripts: [drop(base, 'text')] },
     'text non-string': { transcripts: [{ ...base, text: 123 }] },
-    'nonempty transcript no sentences': t0([]),
+    'nonempty transcript no sentences': noSentences,
     'empty transcript with speech': { transcripts: [{ channel_id: 0, text: '', sentences: [S()] }] },
     'whitespace transcript': { transcripts: [{ channel_id: 0, text: '   ', sentences: [S()] }] },
     'sentences not array': { transcripts: [{ channel_id: 0, text: '你好。', sentences: {} }] },
