@@ -248,6 +248,7 @@ function scanTranscriptPayload(raw: unknown, audio: AudioAsset): ScanOutcome {
   if (sentencesValue.length === 0) return hardStop();
 
   let totalWords = 0;
+  let stopScanning = false;
   for (let index = 0; index < sentencesValue.length; index += 1) {
     const sentence = readRecord(sentencesValue[index]);
     if (sentence === null) {
@@ -292,6 +293,7 @@ function scanTranscriptPayload(raw: unknown, audio: AudioAsset): ScanOutcome {
         if (totalWords > MAX_WORDS) {
           issues.push('hard');
           wordsSkipped = true;
+          stopScanning = true;
         } else {
           for (const rawWord of wordsArr) {
             const word = readRecord(rawWord);
@@ -317,8 +319,8 @@ function scanTranscriptPayload(raw: unknown, audio: AudioAsset): ScanOutcome {
               if (wordBegin.kind === 'value') resolvedBegin = wordBegin.ms;
               if (wordEnd.kind === 'value') resolvedEnd = wordEnd.ms;
 
-              const beginOut = resolvedBegin !== null && (resolvedBegin < 0 || resolvedBegin < begin.ms);
-              const endOut = resolvedEnd !== null && (resolvedEnd < 0 || resolvedEnd > end.ms);
+              const beginOut = resolvedBegin !== null && (resolvedBegin < 0 || resolvedBegin < begin.ms || resolvedBegin > end.ms);
+              const endOut = resolvedEnd !== null && (resolvedEnd < 0 || resolvedEnd > end.ms || resolvedEnd < begin.ms);
               if (beginOut || endOut) {
                 issues.push('hard');
               } else if (resolvedBegin !== null && resolvedEnd !== null) {
@@ -359,6 +361,7 @@ function scanTranscriptPayload(raw: unknown, audio: AudioAsset): ScanOutcome {
     }
 
     sentences.push({ sentenceText, beginMs: begin.ms, endMs: end.ms, units, emotionLabel });
+    if (stopScanning) break;
   }
 
   return { issues, transcriptText, silence: false, sentences };
@@ -434,15 +437,226 @@ function buildAnnotation(outcome: ScanOutcome, audio: AudioAsset, policy: ModelP
 }
 
 /**
- * Native qwen3-asr-flash-filetrans mapper. Behavior is unchanged from the
- * original-waveform contract: the FIRST defect in traversal order decides the
- * failure (missing timing -> `timing_unavailable`; malformed structure or a
- * zero-length/reversed/out-of-clip word -> `invalid_result`), and a fully valid
- * payload (including successful silence) is finalized against the domain schema.
+ * Lexical normalization used ONLY for timing-fusion coverage checks: NFC, then
+ * remove Unicode punctuation and whitespace. No case folding, no substitution.
+ * Lengths and offsets are always measured in Unicode code points.
+ */
+function lexicalNormalize(text: string): string {
+  return text.normalize('NFC').replace(/[\p{P}\p{White_Space}]/gu, '');
+}
+
+function codePointLength(text: string): number {
+  return Array.from(text).length;
+}
+
+/**
+ * Qwen-only lexical pre-flight shared by eligibility inspection and fusion. It
+ * re-derives text purely from the parsed payload (no mutation, no accessors).
+ * Before a calibration would be billed, Qwen must already be internally coherent:
+ * every sentence carries nonempty lexical content, any present word units cover
+ * their own sentence exactly, and the full transcript equals the concatenated
+ * sentence content (all after lexical normalization). A fully valid native
+ * payload never reaches this check, so native mapping behavior is unchanged.
+ */
+function qwenLexicalConsistencyForFusion(outcome: ScanOutcome): boolean {
+  if (outcome.silence || outcome.sentences.length === 0) return false;
+  let concatLex = '';
+  for (const sentence of outcome.sentences) {
+    const sentenceLex = lexicalNormalize(sentence.sentenceText);
+    if (sentenceLex.length === 0) return false;
+    if (sentence.units.length > 0) {
+      let unitsLex = '';
+      for (const unit of sentence.units) unitsLex += lexicalNormalize(unit.text);
+      if (unitsLex !== sentenceLex) return false;
+    }
+    concatLex += sentenceLex;
+  }
+  return concatLex === lexicalNormalize(outcome.transcriptText);
+}
+
+/**
+ * Pure D20 timing fusion. Qwen text, punctuation, sentence emotion, references
+ * and stable ids stay primary; only word/segment timing is replaced by the
+ * Paraformer calibration, and only when that calibration is a valid annotation
+ * for the same asset, is stamped aliyun paraformer-v2 timestamp alignment, has
+ * every unit available/positive/ordered/non-overlapping within the clip, and
+ * covers the complete normalized Qwen lexical sequence with sentence and word
+ * boundaries landing exactly on calibrated unit boundaries (a Qwen single
+ * character is never split out of a multi-character calibrated unit, and no
+ * separate character times are invented). Output units are the actual calibrated
+ * units (text/granularity/timing copied verbatim). A Qwen sentence envelope is
+ * derived from its first/last actual unit and records that derivation. Any
+ * deviation is a safe `invalid_result`; neither input is mutated, no accessor is
+ * executed, and the mandatory final domain validation never yields a partial
+ * annotation. No external observations are merged.
+ */
+function fuseWithCalibration(
+  outcome: ScanOutcome,
+  audio: AudioAsset,
+  calibration: AnnotatedAudio,
+): Mapped {
+  const validatedCal = validateAnnotatedAudio(calibration, audio);
+  if (!validatedCal.ok) return invalidResult();
+  const cal = validatedCal.value;
+  if (cal.asset_id !== audio.asset_id) return invalidResult();
+
+  const calWordTiming = cal.capabilities.word_timing;
+  if (
+    calWordTiming.status !== 'ok' ||
+    calWordTiming.source_provider !== SOURCE_PROVIDER ||
+    calWordTiming.source_model !== PARAFORMER_MODEL
+  ) {
+    return invalidResult();
+  }
+
+  const unitText: string[] = [];
+  const unitGranularity: TimingGranularity[] = [];
+  const unitStart: number[] = [];
+  const unitEnd: number[] = [];
+  const unitLex: string[] = [];
+  const unitStartOffsets: number[] = [];
+  let runningLexOffset = 0;
+  let previousEnd = -1;
+  for (const segment of cal.segments) {
+    let covered = '';
+    for (const unit of segment.units) {
+      if (unit.timing.status !== 'available') return invalidResult();
+      if (unit.timing.source !== PARAFORMER_TIMING_SOURCE) return invalidResult();
+      const startMs = unit.timing.start_ms;
+      const endMs = unit.timing.end_ms;
+      if (startMs < 0 || endMs <= startMs || endMs > audio.duration_ms) return invalidResult();
+      if (startMs < previousEnd) return invalidResult();
+      const lex = lexicalNormalize(unit.text);
+      if (lex.length === 0) return invalidResult();
+      previousEnd = endMs;
+      unitStartOffsets.push(runningLexOffset);
+      runningLexOffset += codePointLength(lex);
+      unitText.push(unit.text);
+      unitGranularity.push(unit.granularity);
+      unitStart.push(startMs);
+      unitEnd.push(endMs);
+      unitLex.push(lex);
+      covered += lex;
+    }
+    if (covered !== lexicalNormalize(segment.text)) return invalidResult();
+  }
+  if (unitStart.length === 0) return invalidResult();
+
+  let calUnitsLex = '';
+  for (const lex of unitLex) calUnitsLex += lex;
+  let calSegmentsLex = '';
+  for (const segment of cal.segments) calSegmentsLex += lexicalNormalize(segment.text);
+  if (calSegmentsLex !== lexicalNormalize(cal.transcript) || calUnitsLex !== calSegmentsLex) {
+    return invalidResult();
+  }
+
+  if (!qwenLexicalConsistencyForFusion(outcome)) return invalidResult();
+  const qwenFullLex = lexicalNormalize(outcome.transcriptText);
+  if (qwenFullLex.length === 0 || qwenFullLex !== calUnitsLex) return invalidResult();
+
+  const boundaries = new Set<number>();
+  for (let i = 0; i <= unitStartOffsets.length; i += 1) {
+    boundaries.add(i === unitStartOffsets.length ? runningLexOffset : unitStartOffsets[i]);
+  }
+
+  const envelopeSource = `${PARAFORMER_TIMING_SOURCE}:unit-envelope`;
+  const segments: TranscriptSegment[] = [];
+  const observations: Observation[] = [];
+  let qwenLexCursor = 0;
+  let unitCursor = 0;
+  let labeled = 0;
+
+  for (let index = 0; index < outcome.sentences.length; index += 1) {
+    const sentence = outcome.sentences[index];
+    const sentenceLex = lexicalNormalize(sentence.sentenceText);
+    const startOffset = qwenLexCursor;
+    const endOffset = startOffset + codePointLength(sentenceLex);
+    if (!boundaries.has(startOffset) || !boundaries.has(endOffset)) return invalidResult();
+
+    if (sentence.units.length > 0) {
+      let wordCursor = startOffset;
+      for (const word of sentence.units) {
+        wordCursor += codePointLength(lexicalNormalize(word.text));
+        if (!boundaries.has(wordCursor)) return invalidResult();
+      }
+      if (wordCursor !== endOffset) return invalidResult();
+    }
+
+    const firstUnit = unitCursor;
+    const units: TimedUnit[] = [];
+    while (unitCursor < unitStart.length && unitStartOffsets[unitCursor] < endOffset) {
+      units.push({
+        text: unitText[unitCursor],
+        granularity: unitGranularity[unitCursor],
+        timing: availableTiming(unitStart[unitCursor], unitEnd[unitCursor], PARAFORMER_TIMING_SOURCE),
+      });
+      unitCursor += 1;
+    }
+    if (units.length === 0) return invalidResult();
+    const lastUnit = unitCursor - 1;
+    if (unitStartOffsets[lastUnit] + codePointLength(unitLex[lastUnit]) !== endOffset) return invalidResult();
+
+    const segmentId = `seg-${index}`;
+    segments.push({
+      segment_id: segmentId,
+      text: sentence.sentenceText,
+      timing: availableTiming(unitStart[firstUnit], unitEnd[lastUnit], envelopeSource),
+      units,
+    });
+
+    if (sentence.emotionLabel !== null && sentence.emotionLabel.length > 0) {
+      observations.push({
+        observation_id: `emotion-${labeled}`,
+        kind: 'emotion',
+        label: sentence.emotionLabel,
+        timing: availableTiming(sentence.beginMs, sentence.endMs, TIMING_SOURCE),
+        source_provider: SOURCE_PROVIDER,
+        source_model: FILETRANS_MODEL,
+        segment_ids: [segmentId],
+      });
+      labeled += 1;
+    }
+    qwenLexCursor = endOffset;
+  }
+  if (unitCursor !== unitStart.length) return invalidResult();
+
+  const capabilities: Capabilities = {
+    word_timing: okCapability(PARAFORMER_MODEL),
+    emotion:
+      labeled === 0
+        ? { status: 'unavailable', reason: EMOTION_UNAVAILABLE_REASON }
+        : okCapability(FILETRANS_MODEL),
+    prosody: { status: 'unavailable', reason: PROSODY_UNAVAILABLE_REASON },
+    sound_event: { status: 'unavailable', reason: SOUND_EVENT_UNAVAILABLE_REASON },
+  };
+
+  return finalize(
+    {
+      schema_version: '0.1',
+      asset_id: audio.asset_id,
+      transcript: outcome.transcriptText,
+      segments,
+      observations,
+      capabilities,
+    },
+    audio,
+  );
+}
+
+/**
+ * Native qwen3-asr-flash-filetrans mapper, optionally fused with ONE Paraformer
+ * timing calibration (D20). A fully valid native payload (speech or silence)
+ * IGNORES `calibration`. With no calibration supplied the strict safe errors are
+ * exactly the original traversal-order behavior (missing timing ->
+ * `timing_unavailable`; malformed/out-of-bounds/zero-length/reversed word ->
+ * `invalid_result`). With a calibration supplied, a payload whose ONLY defects
+ * are soft (missing/zero-length word timing) is fused; any hard defect still
+ * fails safe and never fuses, and fusion rejection is reported as `invalid_result`.
  */
 export function mapFiletransResult(
   raw: unknown,
   asset: AudioAsset,
+  calibration?: AnnotatedAudio,
 ): { ok: true; value: AnnotatedAudio } | { ok: false; error: AnalysisFailure } {
   const validatedAsset = validateAudioAsset(asset);
   if (!validatedAsset.ok) return invalidAudio();
@@ -450,7 +664,12 @@ export function mapFiletransResult(
 
   const outcome = scanTranscriptPayload(raw, audio);
   if (outcome.issues.length > 0) {
-    return outcome.issues[0] === 'missing_timing' ? timingUnavailable() : invalidResult();
+    if (calibration === undefined || calibration === null) {
+      return outcome.issues[0] === 'missing_timing' ? timingUnavailable() : invalidResult();
+    }
+    if (outcome.issues.includes('hard')) return invalidResult();
+    if (!qwenLexicalConsistencyForFusion(outcome)) return invalidResult();
+    return fuseWithCalibration(outcome, audio, calibration);
   }
   return buildAnnotation(outcome, audio, QWEN_POLICY);
 }
@@ -504,6 +723,9 @@ export function inspectFiletransResult(raw: unknown, asset: AudioAsset): Filetra
 
   const outcome = scanTranscriptPayload(raw, audio);
   if (outcome.issues.includes('hard')) return invalidResult();
-  if (outcome.issues.length > 0) return { ok: true, needs_calibration: true };
+  if (outcome.issues.length > 0) {
+    if (!qwenLexicalConsistencyForFusion(outcome)) return invalidResult();
+    return { ok: true, needs_calibration: true };
+  }
   return { ok: true, needs_calibration: false };
 }
