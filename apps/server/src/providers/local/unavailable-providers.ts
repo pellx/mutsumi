@@ -27,28 +27,29 @@ import { makeRoundError, toRoundFailure } from '../../application/round-errors.t
 /** Throw the owned failure for a missing provider, honoring an aborted signal. */
 function unavailable(stage: RoundStage, signal: AbortSignal): never {
   if (signal.aborted) {
-    throw toRoundFailure(signal.reason, stage, signal);
+    const failure = toRoundFailure(signal.reason, stage, signal);
+    throw makeRoundError(failure.code, stage);
   }
   throw makeRoundError('provider_unavailable', stage);
 }
 
 /** Missing-configuration stand-in for local audio analysis. */
 export class UnavailableAudioAnalysis implements LocalAudioAnalysisPort {
-  analyze(_audio: StoredAudio, options: { readonly signal: AbortSignal }): Promise<AnnotatedAudio> {
+  async analyze(_audio: StoredAudio, options: { readonly signal: AbortSignal }): Promise<AnnotatedAudio> {
     unavailable('analysis', options.signal);
   }
 }
 
 /** Missing-configuration stand-in for dialogue generation. */
 export class UnavailableDialogue implements DialoguePort {
-  generate(_context: DialogueContext, options: { readonly signal: AbortSignal }): Promise<ReplyDraft> {
+  async generate(_context: DialogueContext, options: { readonly signal: AbortSignal }): Promise<ReplyDraft> {
     unavailable('dialogue', options.signal);
   }
 }
 
 /** Missing-configuration stand-in for speech synthesis. */
 export class UnavailableSpeechSynthesis implements SpeechSynthesisPort {
-  synthesize(_plan: ReplyPlan, options: { readonly signal: AbortSignal }): Promise<GeneratedSpeech> {
+  async synthesize(_plan: ReplyPlan, options: { readonly signal: AbortSignal }): Promise<GeneratedSpeech> {
     unavailable('synthesis', options.signal);
   }
 }
