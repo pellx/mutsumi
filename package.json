@@ -8,7 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "node --test tests/acceptance/annotation.test.mjs tests/acceptance/filetrans-result.test.mjs tests/acceptance/temporary-publication.test.mjs tests/acceptance/filetrans-analysis.test.mjs",
+    "test": "node --test tests/acceptance/annotation.test.mjs tests/acceptance/filetrans-result.test.mjs tests/acceptance/temporary-publication.test.mjs tests/acceptance/filetrans-analysis.test.mjs tests/acceptance/timing-calibration.test.mjs",
     "typecheck": "tsc --noEmit --strict --allowImportingTsExtensions --target ES2022 --module NodeNext --moduleResolution NodeNext apps/server/src/domain/annotation.ts apps/server/src/application/analysis-ports.ts apps/server/src/providers/aliyun/filetrans-result.ts apps/server/src/providers/aliyun/temporary-publication.ts apps/server/src/providers/aliyun/filetrans-analysis.ts",
     "check": "npm run typecheck && npm test",
     "harness:check": "node tools/harness/run-qwen.mjs --check"
