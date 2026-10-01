@@ -122,7 +122,8 @@ export async function runAudioTool(options: Options): Promise<Uint8Array> {
 
     child.on('close', (code: number | null): void => {
       if (killReason) {
-        finish(() => reject(makeRoundError(killReason, 'intake')));
+        const reason = killReason;
+        finish(() => reject(makeRoundError(reason, 'intake')));
         return;
       }
       if (code === 0) {
