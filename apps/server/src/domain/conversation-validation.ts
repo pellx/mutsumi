@@ -92,7 +92,7 @@ const ALIGNMENT_KEYS = ['units', 'source'];
 
 const ALIGNMENT_UNITS_PATH = '$.alignment.units';
 const STORAGE_KEY_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
-const PLANNED_TIME_SOURCE_PATTERN = /plan|estimat|intend|schedul/i;
+const PLANNED_TIME_SOURCE_PATTERN = /(?:^|[\/:_\s-])(?:plan(?:ned)?|intended|schedule(?:d)?)(?:$|[\/:_\s-])/i;
 const ARRAY_INDEX_PATTERN = /^(?:0|[1-9][0-9]*)$/;
 
 // ---------------------------------------------------------------------------
@@ -661,7 +661,7 @@ function checkGeneratedSpeechAlignment(
     pushIssue(
       issues,
       sourcePath,
-      'alignment source must describe measured output timing, not planned or estimated timing',
+      'alignment source must describe measured output timing, not planned timing',
     );
   }
 
@@ -698,13 +698,22 @@ function checkGeneratedSpeechAlignment(
       pushIssue(issues, joinPath(timingPath, 'status'), 'unit timing must be "available" measured output timing');
       return;
     }
-    checkFieldString(
-      timing['source'],
-      joinPath(timingPath, 'source'),
+    const unitSource = timing['source'];
+    const unitSourcePath = joinPath(timingPath, 'source');
+    const unitSourceOk = checkFieldString(
+      unitSource,
+      unitSourcePath,
       'unit timing source',
       issues,
       MAX_ALIGNMENT_SOURCE_LENGTH,
     );
+    if (unitSourceOk && PLANNED_TIME_SOURCE_PATTERN.test(unitSource)) {
+      pushIssue(
+        issues,
+        unitSourcePath,
+        'unit timing source must describe measured output timing, not planned timing',
+      );
+    }
     const start = timing['start_ms'];
     const end = timing['end_ms'];
     const startOk = Number.isSafeInteger(start) && (start as number) >= 0;
