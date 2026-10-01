@@ -69,7 +69,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 /** Accept only an absent body or an empty plain object; anything else is invalid. */
 function assertEmptyBody(body: unknown): void {
-  if (body === undefined || body === null) return;
+  if (body === undefined) return;
   if (!isPlainRecord(body) || Object.getOwnPropertyNames(body).length > 0) {
     throw makeRoundError('invalid_input', 'intake');
   }
@@ -221,6 +221,7 @@ export class RoundsController {
     @Param('sessionId') sessionId: string,
     @Param('turnId') turnId: string,
   ): Promise<TurnRecord> {
+    this.requireSession(sessionId);
     const record = await this.bounded(
       () => this.runtime.rounds.getTurn(sessionId, turnId),
       'storage',
@@ -239,6 +240,7 @@ export class RoundsController {
     @Param('turnId') turnId: string,
     @Body() body: unknown,
   ): Promise<TurnRecord> {
+    this.requireSession(sessionId);
     assertEmptyBody(body);
     return this.bounded(
       () => this.runtime.rounds.markPlaybackCompleted(sessionId, turnId),
@@ -268,6 +270,7 @@ export class RoundsController {
     @Req() request: Request,
     @Res() response: Response,
   ): Promise<void> {
+    this.requireSession(sessionId);
     const record = await this.bounded(
       () => this.runtime.rounds.getTurn(sessionId, turnId),
       'storage',
@@ -289,6 +292,13 @@ export class RoundsController {
       throw makeRoundError('not_found', 'intake');
     }
     return job;
+  }
+
+  /** Reject any foreign session before a persistence call and hide it uniformly. */
+  private requireSession(sessionId: string): void {
+    if (sessionId !== this.runtime.sessionId) {
+      throw makeRoundError('not_found', 'storage');
+    }
   }
 
   /** Only an asset id already linked by the record may be served. */
@@ -318,7 +328,13 @@ export class RoundsController {
       'storage',
     );
     if (read === null) throw makeRoundError('not_found', 'storage');
-    if (read.asset.asset_id !== linked.asset_id || read.asset.media_type !== linked.media_type) {
+    if (
+      read.asset.asset_id !== linked.asset_id
+      || read.asset.media_type !== linked.media_type
+      || read.asset.duration_ms !== linked.duration_ms
+      || read.asset.sample_rate_hz !== linked.sample_rate_hz
+      || read.asset.channels !== linked.channels
+    ) {
       throw makeRoundError('invalid_result', 'storage');
     }
     const bytes = byteView(read.bytes);
