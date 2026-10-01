@@ -30,7 +30,7 @@
 
 import type { AudioPublicationPort, RemoteAudioReference, StoredAudio } from '../../application/analysis-ports.js';
 import { validateAudioAsset } from '../../domain/annotation.ts';
-import { FILETRANS_MODEL } from './filetrans-result.ts';
+import { FILETRANS_MODEL, PARAFORMER_MODEL } from './filetrans-result.ts';
 
 /** Fixed approved DashScope upload-policy endpoint (Beijing). */
 const UPLOAD_POLICY_URL = 'https://dashscope.aliyuncs.com/api/v1/uploads';
