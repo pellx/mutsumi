@@ -66,7 +66,9 @@
     const t = setTimeout(() => ctrl.abort(), ms);
     try {
       const res = await fetch(url, Object.assign({}, opts, { signal: ctrl.signal }));
-      const data = await res.json().catch(() => null);
+      let data = null;
+      try { data = await res.json(); }
+      catch (e) { if (ctrl.signal.aborted || (e && e.name === 'AbortError')) throw e; data = null; }
       return { res: res, data: data };
     } finally { clearTimeout(t); }
   }
@@ -127,7 +129,7 @@
   async function onRecordClick() {
     if (state !== 'idle') return;
     if (!navigator.mediaDevices || !window.MediaRecorder) { showError('此浏览器不支持麦克风录音，请改用下方"选择音频文件"上传。'); return; }
-    bump(); pauseAssistant(); detachPreview(); setRetry(null);
+    bump(); pauseAssistant(); try { el.originalAudio.pause(); } catch (e) {} detachPreview(); setRetry(null);
     hideError();
     setState('requesting-microphone');
     setStatus('正在请求麦克风权限…');
@@ -369,7 +371,7 @@
     parts.push(emo.length ? ('相关片段候选情绪：' + emo.join('、') + '（情绪归属片段，非逐字词独立判定）') : '相关候选情绪：无');
     parts.forEach((p, i) => { if (i > 0) addText(el.selection, ' '); addText(el.selection, p); });
   }
-  function timingText(t) { if (!t) return '时间不可用'; if (t.status === 'available') return t.start_ms + '-' + t.end_ms + 'ms'; return '时间不可用（' + (t.reason || '未提供') + '）'); }
+  function timingText(t) { if (!t) return '时间不可用'; if (t.status === 'available') return t.start_ms + '-' + t.end_ms + 'ms'; return '时间不可用（' + (t.reason || '未提供') + '）'; }
   function provText(provider, model) { const bits = []; if (provider) bits.push(provider); if (model) bits.push(model); return bits.length ? bits.join('/') : '未知来源'; }
   function renderObservations(rec) {
     clearChildren(el.observations);
@@ -450,22 +452,31 @@
   function playPreview(u) {
     const t = u.timing;
     if (!t || t.status !== 'available') { setStatus('该单元时间不可用，无法试听。'); return; }
-    pauseAssistant(); detachPreview();
+    pauseAssistant();
+    try { el.originalAudio.pause(); } catch (e) {}
+    detachPreview();
     const serial = ++previewSerial;
-    const start = t.start_ms / 1000; previewEndSec = t.end_ms / 1000;
+    const start = t.start_ms / 1000;
+    const end = t.end_ms / 1000;
     const doSeek = () => {
       if (serial !== previewSerial) return;
       detachPreview();
       if (serial !== previewSerial) return;
+      previewEndSec = end;
       try {
         el.originalAudio.currentTime = start;
         el.originalAudio.addEventListener('timeupdate', onPreviewTime);
         el.originalAudio.addEventListener('pause', onPreviewEnd);
         el.originalAudio.addEventListener('ended', onPreviewEnd);
         el.originalAudio.addEventListener('error', onPreviewEnd);
-        previewFallbackTimer = setTimeout(() => { if (serial === previewSerial) pausePreview(); }, Math.max(400, (t.end_ms - t.start_ms) + 1500));
+        const armFallback = () => {
+          if (serial !== previewSerial) return;
+          const remaining = Math.max(0, previewEndSec - el.originalAudio.currentTime);
+          previewFallbackTimer = setTimeout(() => { if (serial === previewSerial) pausePreview(); }, remaining * 1000 + 100);
+        };
         const pr = el.originalAudio.play();
-        if (pr && pr.catch) pr.catch(() => { if (serial === previewSerial) { detachPreview(); setStatus('试听播放失败，可手动播放原始音频。'); applyControls(); } });
+        if (pr && pr.then) pr.then(armFallback, () => { if (serial === previewSerial) { detachPreview(); setStatus('试听播放失败，可手动播放原始音频。'); applyControls(); } });
+        else armFallback();
       } catch (e) { if (serial === previewSerial) { detachPreview(); setStatus('无法定位到该单元区间。'); applyControls(); } }
     };
     if (el.originalAudio.readyState >= 1) doSeek();
@@ -488,18 +499,26 @@
   }
   async function onAssistantEnded() {
     const g = gen;
+    const record = lastRecord;
     const turnId = lastTurnId, sid = sessionId, jobId = currentJobId;
+    const outputAssetId = record && record.output_asset ? record.output_asset.asset_id : null;
+    const mode = record ? record.mode : null;
     if (state === 'playing-reply') setState('idle');
-    if (!turnId || !sid || !jobId) { el.playbackStatus.textContent = '播放结束（无有效轮次标识，未提交确认）。'; return; }
+    if (!record || !turnId || !sid || !jobId || !outputAssetId) { el.playbackStatus.textContent = '播放结束（无有效轮次标识，未提交确认）。'; return; }
     el.playbackStatus.textContent = '正在提交播放完成确认…';
     const url = '/api/sessions/' + encodeURIComponent(sid) + '/turns/' + encodeURIComponent(turnId) + '/playback-completed';
     let out;
     try { out = await requestJSON(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, POLL_FETCH_TIMEOUT_MS); }
     catch (e) { if (fresh(g)) el.playbackStatus.textContent = '播放完成确认提交失败，可手动重播。'; return; }
-    if (!fresh(g)) return;
-    if (out.res.ok) {
+    if (!fresh(g) || lastRecord !== record || lastTurnId !== turnId || sessionId !== sid || currentJobId !== jobId) return;
+    const rec = out.data;
+    const confirmed = !!(out.res.ok && rec && typeof rec === 'object'
+      && rec.turn_id === turnId && rec.session_id === sid && rec.mode === mode
+      && rec.playback_completed === true
+      && rec.output_asset && rec.output_asset.asset_id === outputAssetId);
+    if (confirmed) {
       el.playbackStatus.textContent = '播放完成已确认。';
-      if (lastRecord && lastTurnId === turnId && currentJobId === jobId) lastRecord.playback_completed = true;
+      record.playback_completed = true;
     } else {
       el.playbackStatus.textContent = '播放完成确认失败（' + out.res.status + '），可手动重播。';
     }
