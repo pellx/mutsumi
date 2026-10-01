@@ -89,6 +89,17 @@ function singleHeader(value: string | string[] | undefined): string | undefined 
   return typeof value === 'string' ? value : null;
 }
 
+/** Count a header name across the raw header list, case-insensitively. */
+function countRawHeader(rawHeaders: readonly string[], name: string): number {
+  let count = 0;
+  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
+    if (rawHeaders[index].toLowerCase() === name) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 function isLoopbackHost(host: string, port: number): boolean {
   return host === `${LOOPBACK_HOST}:${port}` || host === `localhost:${port}`;
 }
@@ -101,6 +112,17 @@ function isLoopbackHost(host: string, port: number): boolean {
 function createTransportGuard(): (req: Request, res: Response, next: NextFunction) => void {
   return (req, res, next) => {
     applySecurityHeaders(res);
+
+    // Node merges or drops duplicate recognised headers (for example Host), so
+    // inspect the raw header list. Any duplicate protected name is rejected
+    // before body parsers run, without echoing header contents.
+    const rawHeaders = req.rawHeaders;
+    for (const name of ['host', 'origin', 'sec-fetch-site']) {
+      if (countRawHeader(rawHeaders, name) > 1) {
+        sendFailure(res, 403, 'invalid_input');
+        return;
+      }
+    }
 
     const localPort = req.socket.localPort;
     if (typeof localPort !== 'number' || !Number.isInteger(localPort)) {
@@ -130,22 +152,22 @@ function createTransportGuard(): (req: Request, res: Response, next: NextFunctio
   };
 }
 
-/** Own integer status from a foreign error object; never reads its message. */
+/** Own integer status from a foreign error object; never invokes an accessor. */
 function numericStatusOf(value: unknown): number | undefined {
   if (typeof value !== 'object' || value === null) {
     return undefined;
   }
   const record = value as Record<string, unknown>;
   for (const key of ['status', 'statusCode']) {
-    if (!Object.prototype.hasOwnProperty.call(record, key)) {
+    const descriptor = Object.getOwnPropertyDescriptor(record, key);
+    if (descriptor === undefined) {
       continue;
     }
-    let candidate: unknown;
-    try {
-      candidate = record[key];
-    } catch {
-      return undefined;
+    // Accept only an own data value; an accessor (get/set) is never executed.
+    if (!('value' in descriptor)) {
+      continue;
     }
+    const candidate: unknown = descriptor.value;
     if (typeof candidate === 'number' && Number.isInteger(candidate)) {
       return candidate;
     }
@@ -154,9 +176,12 @@ function numericStatusOf(value: unknown): number | undefined {
 }
 
 function frameworkStatusOf(exception: unknown): number | undefined {
+  // A foreign subclass can override getStatus(), so it is never invoked here.
+  // The framework stores an own integer status; read it through the same safe
+  // own-data helper. Any other thrown value falls back to the same parser
+  // own-data classifier as before.
   if (exception instanceof HttpException) {
-    const status = exception.getStatus();
-    return Number.isInteger(status) ? status : undefined;
+    return numericStatusOf(exception);
   }
   return numericStatusOf(exception);
 }
