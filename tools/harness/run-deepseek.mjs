@@ -86,7 +86,7 @@ child.stderr.on('data', chunk => {
 child.stdin.on('error', () => {});
 const timer = setTimeout(() => { timedOut = true; child.kill(); }, 300000);
 const completion = new Promise((resolve, reject) => { child.on('error', reject); child.on('close', (code, signal) => resolve({ code, signal })); });
-child.stdin.end(`Execute the assigned brief below. Read AGENTS.md first. Do not read .env or enumerate environment variables. Do not delegate to other agents or discover connectors. If a shell or patch fails twice with the same infrastructure error, stop and report; do not probe other file paths.\n\n${await readFile(taskPath, 'utf8')}`);
+child.stdin.end(`Execute the assigned brief below. Read AGENTS.md first. Do not read .env or enumerate environment variables. Do not delegate to other agents or discover connectors. If a shell or patch fails twice with the same infrastructure error, stop and report; do not probe other file paths. Exactly ONE successful file write is allowed in the entire run. Once written, never edit again, including compaction, formatting, typo fixes or line-count reduction. Line-count targets are soft: report an overshoot, do not fix it. The supervisor commits and assigns any subsequent repair separately. After the specified read-only check, report and stop.\n\n${await readFile(taskPath, 'utf8')}`);
 console.log(JSON.stringify({ status: 'started', model, provider: endpoint.hostname, cli: version.stdout.trim(), task: relative }));
 let result;
 try { result = await completion; } finally { clearTimeout(timer); }
