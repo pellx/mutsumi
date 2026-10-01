@@ -1,5 +1,11 @@
 /**
- * M02d - Alibaba qwen3-asr-flash-filetrans asynchronous analysis adapter.
+ * M02d - Alibaba asynchronous file transcription analysis adapter.
+ *
+ * Supports the two approved models: the primary qwen3-asr-flash-filetrans (text,
+ * word timing and sentence emotion) and an optional paraformer-v2 timing pass.
+ * A Qwen run with an injected AudioTimingCalibrationPort may make one additional
+ * timing calibration only when the mapper inspects the parsed result as needing
+ * it; Paraformer and a Qwen run without a port never calibrate.
  *
  * Contract sources: docs/aliyun-asr-integration.md ("Transcription adapter") and
  * docs/tasks/M02-filetrans-analysis.md. This module owns the whole asynchronous
@@ -29,11 +35,18 @@
 import type {
   AnalysisFailure,
   AudioAnalysisPort,
+  AudioTimingCalibrationPort,
   RemoteAudioReference,
 } from '../../application/analysis-ports.js';
 import { validateAudioAsset } from '../../domain/annotation.ts';
 import type { AnnotatedAudio, AudioAsset } from '../../domain/annotation.ts';
-import { FILETRANS_MODEL, mapFiletransResult } from './filetrans-result.ts';
+import {
+  FILETRANS_MODEL,
+  PARAFORMER_MODEL,
+  inspectFiletransResult,
+  mapFiletransResult,
+  mapParaformerResult,
+} from './filetrans-result.ts';
 
 /** Fixed approved DashScope asynchronous submission endpoint (Beijing). */
 const SUBMIT_URL = 'https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription';
@@ -83,6 +96,10 @@ const UNEXPECTED_MESSAGE = 'audio analysis failed before producing a result';
 type PlainRecord = Record<string, unknown>;
 type FetchLike = typeof globalThis.fetch;
 type FetchInit = Parameters<FetchLike>[1];
+type CalibrateBound = AudioTimingCalibrationPort['calibrate'];
+
+/** The two approved ASR models this transport may be configured for. */
+export type FiletransAnalysisModel = typeof FILETRANS_MODEL | typeof PARAFORMER_MODEL;
 
 export type FiletransAnalysisOptions = {
   readonly apiKey: string;
@@ -90,6 +107,8 @@ export type FiletransAnalysisOptions = {
   readonly pollIntervalMs: number;
   readonly maxPolls: number;
   readonly maxResultBytes: number;
+  readonly model?: FiletransAnalysisModel;
+  readonly timingCalibration?: AudioTimingCalibrationPort;
   readonly fetch?: FetchLike;
   readonly now?: () => number;
   readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -220,6 +239,25 @@ function readTranscriptionUrl(output: PlainRecord): string | null {
   const result = readRecordField(output, 'result');
   if (result === null) return null;
   return readNonEmptyString(readField(result, 'transcription_url'));
+}
+
+/**
+ * Paraformer reports per-channel subtasks in `output.results`: exactly one plain
+ * SUCCEEDED subtask carrying a nonempty signed URL. A failed child is a provider
+ * failure even when the parent task succeeded; a missing, multiple, non-object or
+ * still-running child, or one without a usable URL, is a malformed result.
+ */
+function readParaformerTranscriptionUrl(output: PlainRecord): string {
+  const results = readField(output, 'results');
+  if (!Array.isArray(results) || results.length !== 1) throw invalidResult();
+  const subtask = results[0];
+  if (!isPlainRecord(subtask)) throw invalidResult();
+  const status = readField(subtask, 'subtask_status');
+  if (status === 'FAILED' || status === 'UNKNOWN') throw providerFailed();
+  if (status !== 'SUCCEEDED') throw invalidResult();
+  const url = readNonEmptyString(readField(subtask, 'transcription_url'));
+  if (url === null) throw invalidResult();
+  return url;
 }
 
 /** Build the combined caller/deadline signal without an `AbortSignal.any` dependency. */
@@ -447,6 +485,8 @@ export class AlibabaFiletransAnalysis implements AudioAnalysisPort {
   readonly #fetch: FetchLike;
   readonly #now: () => number;
   readonly #sleep: (ms: number, signal: AbortSignal) => Promise<void>;
+  readonly #model: FiletransAnalysisModel;
+  readonly #calibrate: CalibrateBound | null;
 
   constructor(options: FiletransAnalysisOptions) {
     if (!isPlainRecord(options)) throw new Error(CONFIG_MESSAGE);
@@ -472,11 +512,32 @@ export class AlibabaFiletransAnalysis implements AudioAnalysisPort {
     if (nowOption !== undefined && typeof nowOption !== 'function') throw new Error(CONFIG_MESSAGE);
     const sleepOption = readField(options, 'sleep');
     if (sleepOption !== undefined && typeof sleepOption !== 'function') throw new Error(CONFIG_MESSAGE);
+    const modelOption = readField(options, 'model');
+    let model: FiletransAnalysisModel = FILETRANS_MODEL;
+    if (modelOption !== undefined) {
+      if (modelOption !== FILETRANS_MODEL && modelOption !== PARAFORMER_MODEL) {
+        throw new Error(CONFIG_MESSAGE);
+      }
+      model = modelOption as FiletransAnalysisModel;
+    }
+    const calibrationOption = readField(options, 'timingCalibration');
+    let calibrate: CalibrateBound | null = null;
+    if (calibrationOption !== undefined) {
+      if (model === PARAFORMER_MODEL) throw new Error(CONFIG_MESSAGE);
+      if (typeof calibrationOption !== 'object' || calibrationOption === null) {
+        throw new Error(CONFIG_MESSAGE);
+      }
+      const port = calibrationOption as AudioTimingCalibrationPort;
+      if (typeof port.calibrate !== 'function') throw new Error(CONFIG_MESSAGE);
+      calibrate = port.calibrate.bind(port);
+    }
     this.#apiKey = apiKey;
     this.#timeoutMs = timeoutMs;
     this.#pollIntervalMs = pollIntervalMs;
     this.#maxPolls = maxPolls;
     this.#maxResultBytes = maxResultBytes;
+    this.#model = model;
+    this.#calibrate = calibrate;
     this.#fetch = typeof fetchOption === 'function' ? (fetchOption as FetchLike) : globalThis.fetch;
     this.#now = typeof nowOption === 'function' ? (nowOption as () => number) : Date.now;
     this.#sleep =
@@ -520,7 +581,7 @@ export class AlibabaFiletransAnalysis implements AudioAnalysisPort {
   /** Reject a model mismatch, an unsafe reference and an expired reference before any request. */
   #validateReference(remote: RemoteAudioReference): RemoteAudioReference {
     if (!isPlainRecord(remote)) throw invalidAudio();
-    if (readField(remote, 'model') !== FILETRANS_MODEL) throw modelMismatch();
+    if (readField(remote, 'model') !== this.#model) throw modelMismatch();
     const transport = readField(remote, 'transport');
     const uri = readField(remote, 'uri');
     if (typeof uri !== 'string' || uri.length === 0) throw invalidAudio();
@@ -547,6 +608,12 @@ export class AlibabaFiletransAnalysis implements AudioAnalysisPort {
     return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
   }
 
+  /** Read the signed result location for the selected model, validating the Paraformer subtask. */
+  #readResultUrl(output: PlainRecord): string | null {
+    if (this.#model === PARAFORMER_MODEL) return readParaformerTranscriptionUrl(output);
+    return readTranscriptionUrl(output);
+  }
+
   /** Submit exactly one asynchronous task; never retry an ambiguous submission. */
   async #submit(reference: RemoteAudioReference, deadline: Deadline): Promise<Submission> {
     try {
@@ -558,11 +625,24 @@ export class AlibabaFiletransAnalysis implements AudioAnalysisPort {
       if (reference.transport === 'oss-resource') {
         headers['X-DashScope-OssResourceResolve'] = 'enable';
       }
-      const body = JSON.stringify({
-        model: FILETRANS_MODEL,
-        input: { file_url: reference.uri },
-        parameters: { channel_id: [0], enable_itn: false, enable_words: true },
-      });
+      const body =
+        this.#model === PARAFORMER_MODEL
+          ? JSON.stringify({
+              model: PARAFORMER_MODEL,
+              input: { file_urls: [reference.uri] },
+              parameters: {
+                channel_id: [0],
+                disfluency_removal_enabled: false,
+                timestamp_alignment_enabled: true,
+                language_hints: ['zh'],
+                diarization_enabled: false,
+              },
+            })
+          : JSON.stringify({
+              model: FILETRANS_MODEL,
+              input: { file_url: reference.uri },
+              parameters: { channel_id: [0], enable_itn: false, enable_words: true },
+            });
       const response = await this.#fetchGuarded(
         SUBMIT_URL,
         { method: 'POST', headers, body, redirect: 'error', signal: deadline.signal },
@@ -588,7 +668,7 @@ export class AlibabaFiletransAnalysis implements AudioAnalysisPort {
       const status = readField(output, 'task_status');
       if (status === 'PENDING' || status === 'RUNNING') return { kind: 'poll', taskId };
       if (status === 'SUCCEEDED') {
-        return { kind: 'result', taskId, resultUrl: readTranscriptionUrl(output) };
+        return { kind: 'result', taskId, resultUrl: this.#readResultUrl(output) };
       }
       if (status === 'FAILED' || status === 'UNKNOWN') throw providerFailed();
       throw submissionFailed();
@@ -603,10 +683,11 @@ export class AlibabaFiletransAnalysis implements AudioAnalysisPort {
       const url = `${TASKS_URL}${encodeURIComponent(taskId)}`;
       for (let attempt = 0; attempt < this.#maxPolls; attempt += 1) {
         await this.#wait(deadline);
+        const pollMethod = this.#model === PARAFORMER_MODEL ? 'POST' : 'GET';
         const response = await this.#fetchGuarded(
           url,
           {
-            method: 'GET',
+            method: pollMethod,
             headers: { Authorization: `Bearer ${this.#apiKey}` },
             redirect: 'error',
             signal: deadline.signal,
@@ -631,7 +712,7 @@ export class AlibabaFiletransAnalysis implements AudioAnalysisPort {
         if (readField(output, 'task_id') !== taskId) throw invalidResult();
         const status = readField(output, 'task_status');
         if (status === 'PENDING' || status === 'RUNNING') continue;
-        if (status === 'SUCCEEDED') return readTranscriptionUrl(output);
+        if (status === 'SUCCEEDED') return this.#readResultUrl(output);
         if (status === 'FAILED' || status === 'UNKNOWN') throw providerFailed();
         throw invalidResult();
       }
@@ -679,7 +760,24 @@ export class AlibabaFiletransAnalysis implements AudioAnalysisPort {
       } catch {
         throw invalidResult();
       }
-      const mapped = mapFiletransResult(parsed, audio);
+      if (this.#model === PARAFORMER_MODEL) {
+        const mapped = mapParaformerResult(parsed, audio);
+        if (!mapped.ok) throw trustedFailure(mapped.error);
+        throwIfAborted(deadline);
+        return mapped.value;
+      }
+      let calibration: AnnotatedAudio | undefined;
+      if (this.#calibrate !== null) {
+        const inspection = inspectFiletransResult(parsed, audio);
+        if (!inspection.ok) throw trustedFailure(inspection.error);
+        if (inspection.needs_calibration) {
+          throwIfAborted(deadline);
+          const port = this.#calibrate;
+          calibration = await raceAbort(port(audio, { signal: deadline.signal }), deadline);
+          throwIfAborted(deadline);
+        }
+      }
+      const mapped = mapFiletransResult(parsed, audio, calibration);
       if (!mapped.ok) throw trustedFailure(mapped.error);
       throwIfAborted(deadline);
       return mapped.value;
