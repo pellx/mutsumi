@@ -6,10 +6,11 @@
 
 - 与框架和供应商无关的语音标注数据类型、校验、JSON 解析及序列化。
 - 显式记录时间是否可用、字词起止时间、片段情绪、来源和分数含义；不伪造缺失数据。
-- 104 个合成数据验收测试及严格类型检查。
-- 通过 Codex CLI 调用百炼 Qwen3.8-Flash 的受限编码 harness。
+- 转写与发布接口、阿里云结果映射、临时上传、异步任务提交/轮询/结果下载适配器。
+- 合成数据验收测试及严格类型检查，覆盖时间边界、取消、超时、响应大小和错误信息隔离。
+- 通过 Codex CLI 调用 Qwen3.8-Flash 的受限编码 harness；Qwen 失败时使用用户授权的官方 DeepSeek 后备。
 
-目前没有可启动的 NestJS 服务、录音界面或完整语音对话流程。真实音频效果尚未验收。已选下一阶段使用 qwen3-asr-flash-filetrans 异步转写、开启文字时间戳和句级情绪，先用百炼临时上传，后续替换成自己的 OSS。
+目前没有可启动的 NestJS 服务、录音界面或完整语音对话流程。已选 qwen3-asr-flash-filetrans 异步转写、文字时间戳和句级情绪，先用百炼临时上传，后续替换成自己的 OSS。真实上传、提交、轮询和下载已用 6.268 秒的本地合成中文样本验证；实际结果中两个字的起止时间相同，当前严格映射拒绝该结果，时间缺失处理方式正在与用户确认。真实人声的情绪识别质量尚未验收。
 
 ## 本地检查
 
@@ -24,13 +25,15 @@ npm run check
 
 ## 编码委派
 
-业务代码由 Qwen 编写，Codex 负责接口、任务范围、审查和独立验收。历史 DeepSeek 工具保留供追溯，已停止使用。
+业务代码优先由 Qwen 编写，连接失败时按用户授权调用官方 DeepSeek。Codex 负责接口、任务范围、审查和独立验收。编码模型和运行时 ASR、对话、TTS 模型分别选择。
 
 将 `.env.example` 的配置复制到本地 `.env`，填入 `DASHSCOPE_API_KEY`。需要安装 Codex CLI。以下 readiness 检查不证明联网成功：
 
 ```sh
 npm run harness:check
 node tools/harness/run-qwen.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=600000
+# Qwen 失败时，使用独立的 DEEPSEEK_API_KEY 和已释放任务：
+node tools/harness/run-deepseek.mjs docs/tasks/TASK.md
 ```
 
 最后一条会调用付费编码模型，只运行已经释放的任务。每次委派只修改一个指定文件，监督者立即单独提交再验收。`.env`、私有录音 `data/`、编码报告 `.runtime/` 和依赖目录均忽略，不提交。
