@@ -1,0 +1,5 @@
+# Repair message-envelope acceptance: one file
+
+Qwen3.8-Flash only. Modify ONLY apps/server/src/providers/ohmygpt/ohmygpt-audio-analysis.ts with one physical write, then stop for the supervisor commit. No Git, dotenv, live calls, data, launchers or other files. Required architecture/flow preloaded. Read ONLY the extractModelText function (rg -n with ~65 lines of context around `function extractModelText`); no full adapter/helper/schema rereads. The current function rejects tool_calls/function_call/refusal on the choice, but fails to reject these fields inside choice.message, where OpenAI-compatible APIs actually put them.
+
+After the validated message role, reject each of message.tool_calls, message.function_call and message.refusal when present and nonnull, using the same safe invalid envelope result. Preserve existing choice guards, exact model/index/finish checks, mapper and all other code unchanged. Build in memory with a unique asserted anchor, write once, run ONLY npm run typecheck, report and stop. At most three shell calls: function read, in-memory edit/write, typecheck.
