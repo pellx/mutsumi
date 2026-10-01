@@ -33,7 +33,6 @@ const prompt = 'The supervisor, not the implementing agent, performs the immedia
 const redact = text => text.replace(/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED]');
 const configs = {
   model_provider: 'openai',
-  'model_providers.openai.supports_websockets': false,
   model_reasoning_effort: effort,
   web_search: 'disabled',
   show_raw_agent_reasoning: false,
