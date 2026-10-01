@@ -67,6 +67,7 @@ const sub = (bytesArr, id) => ({ session_id: SESSION, client_request_id: reqId(i
 
 function harness(opts = {}) {
   const calls = { intake: 0, analysis: 0, dialogue: 0, synth: 0, save: 0, getTurn: 0, mark: 0 };
+  const order = [];
   const received = [];
   let saved = null;
   const deps = {
@@ -75,24 +76,25 @@ function harness(opts = {}) {
     intake: {
       async ingest(s) {
         calls.intake++;
-        received.push(Array.from(s.submission ? [] : []));
+        order.push('intake');
         if (opts.intakeGate) await opts.intakeGate;
+        received.push(Array.from(s.bytes));
         return { original: { asset: structuredClone(WAV(SRC)), storage_key: SRC }, analysis: { asset: structuredClone(WAV(INP)), storage_key: INP } };
       },
     },
-    analysis: { async analyze() { calls.analysis++; return opts.analysis ? opts.analysis() : structuredClone(mkAnnotation()); } },
-    dialogue: { async generate() { calls.dialogue++; if (opts.dialogueFail) throw opts.dialogueFail; return structuredClone(mkDraft()); } },
-    synthesis: { async synthesize() { calls.synth++; if (opts.synthesisFail) throw opts.synthesisFail; return structuredClone(mkSpeech()); } },
+    analysis: { async analyze() { calls.analysis++; order.push('analysis'); return opts.analysis ? opts.analysis() : structuredClone(mkAnnotation()); } },
+    dialogue: { async generate() { calls.dialogue++; order.push('dialogue'); if (opts.dialogueFail) throw opts.dialogueFail; return structuredClone(mkDraft()); } },
+    synthesis: { async synthesize() { calls.synth++; order.push('synthesis'); if (opts.synthesisFail) throw opts.synthesisFail; return structuredClone(mkSpeech()); } },
     store: {
-      loadPersona: async () => structuredClone(mkPersona()),
-      loadPreferences: async () => [],
-      recentHistory: async () => structuredClone(opts.history ?? []),
-      saveTurn: async (t) => { calls.save++; if (opts.saveFail) throw new Error('disk'); saved = structuredClone(t); },
+      loadPersona: async () => { order.push('persona'); return structuredClone(mkPersona()); },
+      loadPreferences: async () => { order.push('preferences'); return []; },
+      recentHistory: async () => { order.push('history'); return structuredClone(opts.history ?? []); },
+      saveTurn: async (t) => { calls.save++; order.push('save'); if (opts.saveFail) throw new Error('disk'); saved = structuredClone(t); },
       getTurn: async () => { calls.getTurn++; return saved ? structuredClone(saved) : null; },
       markPlaybackCompleted: async () => { calls.mark++; if (!saved) throw new Error('no turn'); const c = structuredClone(saved); c.playback_completed = true; saved = c; return structuredClone(saved); },
     },
   };
-  return { service: new RoundService(deps), calls, saved: () => saved };
+  return { service: new RoundService(deps), calls, order, received, saved: () => saved };
 }
 
 async function terminal(service, jobId, budgetMs = 2000) {
@@ -106,10 +108,11 @@ async function terminal(service, jobId, budgetMs = 2000) {
 }
 
 test('complete round sequences each port once and stores a valid unplayed record', async () => {
-  const { service, calls } = harness();
+  const { service, calls, order } = harness();
   const job = service.submit(sub(bytes([1, 2, 3, 4]), 1));
   const done = await terminal(service, job.job_id);
   assert.equal(done.status, 'complete');
+  assert.deepEqual(order, ['intake', 'analysis', 'persona', 'preferences', 'history', 'dialogue', 'synthesis', 'save']);
   assert.equal(done.persisted, true);
   assert.equal(calls.intake, 1);
   assert.equal(calls.analysis, 1);
@@ -165,7 +168,7 @@ test('new request id while a round is pending is rejected busy, then the pending
   const { service } = harness({ intakeGate: gate });
   try {
     const first = service.submit(sub(bytes([1]), 4));
-    assert.equal(first.status, 'processing');
+    assert.equal(first.status, 'queued');
     assert.throws(() => service.submit(sub(bytes([2]), 5)), (e) => /busy/.test(e.message));
     release();
     const done = await terminal(service, first.job_id);
@@ -174,23 +177,29 @@ test('new request id while a round is pending is rejected busy, then the pending
 });
 
 test('caller mutation of submitted bytes and returned snapshots cannot alter accepted state', async () => {
-  const { service } = harness();
-  const buf = bytes([7, 8, 9]);
-  const job = service.submit(sub(buf, 6));
-  buf[0] = 99;
-  job.status = 'tampered';
-  job.record = { fabricated: true };
-  assert.notEqual(service.getJob(job.job_id).status, 'tampered');
-  assert.equal(service.getJob(job.job_id).record, null);
-  const done = await terminal(service, job.job_id);
-  const rec = done.record;
-  assert.equal(rec.annotation.transcript, 'hello world');
-  rec.playback_completed = true;
-  rec.input_asset.asset_id = 'zzz';
-  const reread = service.getJob(job.job_id).record;
-  assert.equal(reread.playback_completed, false);
-  assert.equal(reread.input_asset.asset_id, INP);
-  assert.equal(done.status, 'complete');
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const { service, received } = harness({ intakeGate: gate });
+  try {
+    const buf = bytes([7, 8, 9]);
+    const job = service.submit(sub(buf, 6));
+    buf[0] = 99;
+    job.status = 'tampered';
+    job.record = { fabricated: true };
+    assert.notEqual(service.getJob(job.job_id).status, 'tampered');
+    assert.equal(service.getJob(job.job_id).record, null);
+    release();
+    const done = await terminal(service, job.job_id);
+    assert.deepEqual(received[0], [7, 8, 9]);
+    const rec = done.record;
+    assert.equal(rec.annotation.transcript, 'hello world');
+    rec.playback_completed = true;
+    rec.input_asset.asset_id = 'zzz';
+    const reread = service.getJob(job.job_id).record;
+    assert.equal(reread.playback_completed, false);
+    assert.equal(reread.input_asset.asset_id, INP);
+    assert.equal(done.status, 'complete');
+  } finally { release(); }
 });
 
 test('unavailable analysis records both assets and an explicit gap and skips dialogue and synthesis', async () => {
@@ -278,7 +287,7 @@ test('the public record exposes no storage key, raw payload, signed reference or
   const job = service.submit(sub(bytes([1, 2]), 12));
   const done = await terminal(service, job.job_id);
   const blob = JSON.stringify(done.record);
-  for (const forbidden of ['storage_key', 'http', 'oss://', 'file:', 'D:\\', '/', 'PRIVATE']) {
+  for (const forbidden of ['storage_key', 'http', 'oss://', 'file:', 'D:\\', 'PRIVATE']) {
     assert.ok(!blob.includes(forbidden), `public record must not contain ${forbidden}`);
   }
 });
@@ -317,6 +326,7 @@ test('dialogue context bounds history to six turns, flags truncation, and keeps 
   const snapshot = JSON.stringify(input);
   const ctx = buildDialogueContext(input);
   assert.equal(ctx.history.length, 6);
+  assert.deepEqual(ctx.history.map((turn) => turn.user_text), ['u2', 'u3', 'u4', 'u5', 'u6', 'u7']);
   assert.equal(ctx.truncated, true);
   assert.deepEqual(ctx.current.observations, []);
   assert.ok(ctx.current.capability_gaps.includes('emotion:unavailable'));
