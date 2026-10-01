@@ -261,6 +261,14 @@ function toOpenApiSchemaSubset(value: unknown): unknown {
     if (key === '$schema') continue;
     copy[key] = toOpenApiSchemaSubset(record[key]);
   }
+  if (
+    copy.type === undefined &&
+    Array.isArray(copy.enum) &&
+    copy.enum.length > 0 &&
+    (copy.enum as unknown[]).every((v) => typeof v === 'string')
+  ) {
+    copy.type = 'string';
+  }
   return copy;
 }
 
