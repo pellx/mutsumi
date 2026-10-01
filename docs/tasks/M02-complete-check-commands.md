@@ -1,0 +1,5 @@
+# M02 — Include all current adapter checks
+
+Authorized official DeepSeek fallback. Read AGENTS.md, voice-system-flow.md, docs/architecture.md and package.json. Modify ONLY package.json in ONE successful write; no subsequent edit, Git, lock/dependency changes, credentials, private data or network. No test commands required; supervisor runs them separately.
+
+Keep all metadata, pinned devDependencies, engines and harness:check unchanged. Update scripts.test to explicitly run all four current acceptance files: annotation.test.mjs, filetrans-result.test.mjs, temporary-publication.test.mjs and filetrans-analysis.test.mjs under tests/acceptance. Update scripts.typecheck to keep the existing flags and three files and add apps/server/src/providers/aliyun/temporary-publication.ts and apps/server/src/providers/aliyun/filetrans-analysis.ts. check remains npm run typecheck && npm test. Do not introduce a glob or include ignored live QA. Saved-file read-back only, report exact changed keys. This script expansion does not claim live emotion acceptance.
