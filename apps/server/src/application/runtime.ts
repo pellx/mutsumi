@@ -22,6 +22,7 @@ import {
   DevelopmentSpeechSynthesis,
 } from '../providers/development/mock-conversation.ts';
 import { GeminiAudioAnalysis } from '../providers/google/gemini-audio-analysis.ts';
+import { OhMyGptAudioAnalysis } from '../providers/ohmygpt/ohmygpt-audio-analysis.ts';
 
 export const RUNTIME_TOKEN = Symbol('mutsumi.runtime');
 
@@ -52,6 +53,8 @@ export type CreateRuntimeOptions = {
   mode: RuntimeMode;
   geminiApiKey?: string;
   freeTierConfirmed?: boolean;
+  analysisProvider?: 'ohmygpt' | 'google';
+  ohmygptApiKey?: string;
   ffmpegBin?: string;
   ffprobeBin?: string;
 };
@@ -98,19 +101,38 @@ export function createRuntime(options: CreateRuntimeOptions): Runtime {
   let synthesisHealth: RuntimeHealth['synthesis'];
 
   if (mode === 'live') {
-    const hasKey = typeof options.geminiApiKey === 'string' && options.geminiApiKey.trim().length > 0;
-    const confirmed = options.freeTierConfirmed === true;
-    if (hasKey && confirmed) {
-      analysis = new GeminiAudioAnalysis({
-        apiKey: (options.geminiApiKey as string).trim(),
-        freeTierConfirmed: true,
-        timeoutMs: 60_000,
-        readAudio: (key, opts) => audioStorage.readByKey(key, opts),
-      });
-      analysisHealth = { provider: 'google', model: 'gemini-3.8-flash', status: 'configured', reason: 'Configuration only; live verification pending.' };
+    if (options.analysisProvider !== undefined && options.analysisProvider !== 'ohmygpt' && options.analysisProvider !== 'google') {
+      throw new Error('analysisProvider must be "ohmygpt" or "google"');
+    }
+    const provider = options.analysisProvider === 'google' ? 'google' : 'ohmygpt';
+    if (provider === 'ohmygpt') {
+      const hasOhMyKey = typeof options.ohmygptApiKey === 'string' && options.ohmygptApiKey.trim().length > 0;
+      if (hasOhMyKey) {
+        analysis = new OhMyGptAudioAnalysis({
+          apiKey: (options.ohmygptApiKey as string).trim(),
+          timeoutMs: 60_000,
+          readAudio: (key, opts) => audioStorage.readByKey(key, opts),
+        });
+        analysisHealth = { provider: 'ohmygpt', model: 'gemini-3.8-flash', status: 'configured', reason: 'Configuration only; live verification pending.' };
+      } else {
+        analysis = new UnavailableAudioAnalysis();
+        analysisHealth = { provider: 'ohmygpt', model: 'gemini-3.8-flash', status: 'unavailable', reason: 'OhMyGpt dedicated API key missing.' };
+      }
     } else {
-      analysis = new UnavailableAudioAnalysis();
-      analysisHealth = { provider: null, model: null, status: 'unavailable', reason: 'Gemini API key or free-tier confirmation missing.' };
+      const hasKey = typeof options.geminiApiKey === 'string' && options.geminiApiKey.trim().length > 0;
+      const confirmed = options.freeTierConfirmed === true;
+      if (hasKey && confirmed) {
+        analysis = new GeminiAudioAnalysis({
+          apiKey: (options.geminiApiKey as string).trim(),
+          freeTierConfirmed: true,
+          timeoutMs: 60_000,
+          readAudio: (key, opts) => audioStorage.readByKey(key, opts),
+        });
+        analysisHealth = { provider: 'google', model: 'gemini-3.8-flash', status: 'configured', reason: 'Configuration only; live verification pending.' };
+      } else {
+        analysis = new UnavailableAudioAnalysis();
+        analysisHealth = { provider: null, model: null, status: 'unavailable', reason: 'Gemini API key or free-tier confirmation missing.' };
+      }
     }
     dialogue = new UnavailableDialogue();
     dialogueHealth = { provider: null, model: null, status: 'unavailable', reason: 'Dialogue model not selected.' };
