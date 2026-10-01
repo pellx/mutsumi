@@ -1,10 +1,17 @@
 /**
- * M02b - map Alibaba qwen3-asr-flash-filetrans result JSON into AnnotatedAudio.
+ * M02b/D20 - map Alibaba ASR file-transcription result JSON into AnnotatedAudio.
  *
- * Contract sources: docs/aliyun-asr-integration.md ("Transcription adapter") and
- * docs/tasks/M02-filetrans-mapper.md. Only the downloaded transcription payload
- * is mapped here; submission, polling and download stay transport concerns, and
- * no vendor SDK type crosses this boundary.
+ * Contract sources: docs/aliyun-asr-integration.md and docs/tasks/M02-filetrans-mapper.md.
+ * Only the downloaded transcription payload is mapped here; submission, polling and
+ * download stay transport concerns, and no vendor SDK type crosses this boundary.
+ *
+ * The qwen3-asr-flash-filetrans native path (`mapFiletransResult`) and the
+ * Paraformer timing-calibration path (`mapParaformerResult`) share ONE strict
+ * parser (`scanTranscriptPayload`) so the two models never diverge on validation
+ * rules. `inspectFiletransResult` runs the same full-payload scan and reports
+ * whether the only defects are timing-eligibility defects (missing/empty word
+ * arrays, missing word times, or equal otherwise-valid word boundaries), which the
+ * transport may resolve with a single calibration pass (D20).
  *
  * Notes:
  * - Spoken text requires measured word timing in this first version: a nonempty
@@ -30,25 +37,85 @@ import type {
 import type { AnalysisFailure } from '../../application/analysis-ports.js';
 
 export const FILETRANS_MODEL = 'qwen3-asr-flash-filetrans';
+export const PARAFORMER_MODEL = 'paraformer-v2';
 
 const SOURCE_PROVIDER = 'aliyun';
 const TIMING_SOURCE = `aliyun:${FILETRANS_MODEL}`;
+const PARAFORMER_TIMING_SOURCE = `aliyun:${PARAFORMER_MODEL}:timestamp_alignment`;
 const MAX_TRANSCRIPTS = 1;
 const MAX_SENTENCES = 10000;
 const MAX_WORDS = 100000;
 
 const INVALID_AUDIO_MESSAGE = 'audio asset is not a valid transcription input';
 const INVALID_RESULT_MESSAGE = 'provider result is not a valid transcription payload for this model';
+const PARAFORMER_INVALID_MESSAGE = 'provider result is not a valid timing-calibration payload for this model';
 const TIMING_UNAVAILABLE_MESSAGE = 'provider result is missing measured word timing for spoken text';
 const INVALID_ANNOTATION_MESSAGE = 'mapped transcription result is not valid annotated audio';
 const EMOTION_UNAVAILABLE_REASON = 'provider returned no sentence emotion label for the transcribed speech';
 const PROSODY_UNAVAILABLE_REASON = `prosody detection is not supported by ${FILETRANS_MODEL}`;
 const SOUND_EVENT_UNAVAILABLE_REASON = `sound-event detection is not supported by ${FILETRANS_MODEL}`;
+const PARAFORMER_PROSODY_UNAVAILABLE_REASON = `prosody detection is not supported by ${PARAFORMER_MODEL}`;
+const PARAFORMER_SOUND_EVENT_UNAVAILABLE_REASON = `sound-event detection is not supported by ${PARAFORMER_MODEL}`;
+const PARAFORMER_EMOTION_UNAVAILABLE_REASON = `${PARAFORMER_MODEL} is a timing-calibration model and provides no emotion labels`;
 
 type PlainRecord = Record<string, unknown>;
 type TimeRead = { kind: 'missing' } | { kind: 'invalid' } | { kind: 'value'; ms: number };
 type Failure = { ok: false; error: AnalysisFailure };
 type Mapped = { ok: true; value: AnnotatedAudio } | Failure;
+
+/** One shared classification of a payload defect. */
+type IssueKind = 'hard' | 'missing_timing' | 'zero_length';
+
+type ParsedUnit = {
+  text: string;
+  granularity: TimingGranularity;
+  beginMs: number;
+  endMs: number;
+};
+
+type ParsedSentence = {
+  sentenceText: string;
+  beginMs: number;
+  endMs: number;
+  units: ParsedUnit[];
+  emotionLabel: string | null;
+};
+
+/** Result of a FULL strict scan. `sentences` is complete only when `issues` is empty. */
+type ScanOutcome = {
+  issues: IssueKind[];
+  transcriptText: string;
+  silence: boolean;
+  sentences: ParsedSentence[];
+};
+
+/** Per-model provenance/consumption policy layered on top of the shared parser. */
+type ModelPolicy = {
+  readonly model: string;
+  readonly timingSource: string;
+  readonly emotionMode: 'qwen' | 'paraformer';
+  readonly prosodyReason: string;
+  readonly soundEventReason: string;
+  readonly emotionUnavailableReason: string;
+};
+
+const QWEN_POLICY: ModelPolicy = {
+  model: FILETRANS_MODEL,
+  timingSource: TIMING_SOURCE,
+  emotionMode: 'qwen',
+  prosodyReason: PROSODY_UNAVAILABLE_REASON,
+  soundEventReason: SOUND_EVENT_UNAVAILABLE_REASON,
+  emotionUnavailableReason: EMOTION_UNAVAILABLE_REASON,
+};
+
+const PARAFORMER_POLICY: ModelPolicy = {
+  model: PARAFORMER_MODEL,
+  timingSource: PARAFORMER_TIMING_SOURCE,
+  emotionMode: 'paraformer',
+  prosodyReason: PARAFORMER_PROSODY_UNAVAILABLE_REASON,
+  soundEventReason: PARAFORMER_SOUND_EVENT_UNAVAILABLE_REASON,
+  emotionUnavailableReason: PARAFORMER_EMOTION_UNAVAILABLE_REASON,
+};
 
 /** Canonical non-negative array index keys: `0`, `1`, ... (no leading zeros). */
 const ARRAY_INDEX_KEY = /^(?:0|[1-9][0-9]*)$/;
@@ -119,177 +186,316 @@ function failure(code: AnalysisFailure['code'], message: string): Failure {
   return { ok: false, error: { code, stage: 'transcription', message, retryable: false } };
 }
 
-function okCapability(): { status: 'ok'; source_provider: string; source_model: string } {
-  return { status: 'ok', source_provider: SOURCE_PROVIDER, source_model: FILETRANS_MODEL };
+const invalidAudio = (): Failure => failure('invalid_audio', INVALID_AUDIO_MESSAGE);
+const invalidResult = (): Failure => failure('invalid_result', INVALID_RESULT_MESSAGE);
+const timingUnavailable = (): Failure => failure('timing_unavailable', TIMING_UNAVAILABLE_MESSAGE);
+
+function okCapability(model: string): { status: 'ok'; source_provider: string; source_model: string } {
+  return { status: 'ok', source_provider: SOURCE_PROVIDER, source_model: model };
 }
 
-function availableTiming(startMs: number, endMs: number): {
-  status: 'available';
-  start_ms: number;
-  end_ms: number;
-  source: string;
-} {
-  return { status: 'available', start_ms: startMs, end_ms: endMs, source: TIMING_SOURCE };
+function availableTiming(
+  startMs: number,
+  endMs: number,
+  source: string,
+): { status: 'available'; start_ms: number; end_ms: number; source: string } {
+  return { status: 'available', start_ms: startMs, end_ms: endMs, source };
 }
 
 function finalize(document: AnnotatedAudio, asset: AudioAsset): Mapped {
   const validated = validateAnnotatedAudio(document, asset);
-  if (!validated.ok) return failure('invalid_result', INVALID_ANNOTATION_MESSAGE);
+  if (!validated.ok) return invalidResult();
   return { ok: true, value: validated.value };
 }
 
-/** Successful silence: requested analysis ran, no speech, no observations. */
-function buildSilence(asset: AudioAsset): AnnotatedAudio {
-  const capabilities: Capabilities = {
-    word_timing: okCapability(),
-    emotion: okCapability(),
-    prosody: { status: 'unavailable', reason: PROSODY_UNAVAILABLE_REASON },
-    sound_event: { status: 'unavailable', reason: SOUND_EVENT_UNAVAILABLE_REASON },
+/**
+ * The single strict parser shared by both models. It NEVER throws, NEVER mutates
+ * the input and NEVER invokes an accessor (accessor-bearing records/arrays are
+ * rejected by `readRecord`/`readArray` before any field read). It scans the whole
+ * payload, recording every defect in traversal order so callers can both
+ * short-circuit faithfully (native mapper) and inspect eligibility globally.
+ */
+function scanTranscriptPayload(raw: unknown, audio: AudioAsset): ScanOutcome {
+  const issues: IssueKind[] = [];
+  const sentences: ParsedSentence[] = [];
+  const hardStop = (): ScanOutcome => {
+    issues.push('hard');
+    return { issues, transcriptText: '', silence: false, sentences };
   };
-  return {
-    schema_version: '0.1',
-    asset_id: asset.asset_id,
-    transcript: '',
-    segments: [],
-    observations: [],
-    capabilities,
-  };
-}
-
-export function mapFiletransResult(
-  raw: unknown,
-  asset: AudioAsset,
-): { ok: true; value: AnnotatedAudio } | { ok: false; error: AnalysisFailure } {
-  const validatedAsset = validateAudioAsset(asset);
-  if (!validatedAsset.ok) return failure('invalid_audio', INVALID_AUDIO_MESSAGE);
-  const audio = validatedAsset.value;
-
-  const invalid = (): Failure => failure('invalid_result', INVALID_RESULT_MESSAGE);
-  const timingUnavailable = (): Failure => failure('timing_unavailable', TIMING_UNAVAILABLE_MESSAGE);
 
   const root = readRecord(raw);
-  if (root === null) return invalid();
+  if (root === null) return hardStop();
 
   const transcripts = readArray(field(root, 'transcripts'), MAX_TRANSCRIPTS);
-  if (transcripts === null || transcripts.length !== MAX_TRANSCRIPTS) return invalid();
+  if (transcripts === null || transcripts.length !== MAX_TRANSCRIPTS) return hardStop();
 
   const transcript = readRecord(transcripts[0]);
-  if (transcript === null) return invalid();
+  if (transcript === null) return hardStop();
 
-  const channelId = field(transcript, 'channel_id');
-  if (channelId !== 0) return invalid();
+  if (field(transcript, 'channel_id') !== 0) return hardStop();
 
   const transcriptText = field(transcript, 'text');
-  if (typeof transcriptText !== 'string') return invalid();
+  if (typeof transcriptText !== 'string') return hardStop();
 
-  const sentences = readArray(field(transcript, 'sentences'), MAX_SENTENCES);
-  if (sentences === null) return invalid();
+  const sentencesValue = readArray(field(transcript, 'sentences'), MAX_SENTENCES);
+  if (sentencesValue === null) return hardStop();
 
   if (transcriptText.length === 0) {
-    if (sentences.length > 0) return invalid();
-    return finalize(buildSilence(audio), audio);
+    if (sentencesValue.length > 0) return hardStop();
+    return { issues, transcriptText: '', silence: true, sentences };
   }
-  if (transcriptText.trim().length === 0) return invalid();
-  if (sentences.length === 0) return invalid();
+  if (transcriptText.trim().length === 0) return hardStop();
+  if (sentencesValue.length === 0) return hardStop();
 
-  const segments: TranscriptSegment[] = [];
-  const observations: Observation[] = [];
-  let labeledSentences = 0;
   let totalWords = 0;
-
-  for (let index = 0; index < sentences.length; index += 1) {
-    const sentence = readRecord(sentences[index]);
-    if (sentence === null) return invalid();
+  for (let index = 0; index < sentencesValue.length; index += 1) {
+    const sentence = readRecord(sentencesValue[index]);
+    if (sentence === null) {
+      issues.push('hard');
+      continue;
+    }
 
     const sentenceText = field(sentence, 'text');
-    if (typeof sentenceText !== 'string' || sentenceText.trim().length === 0) return invalid();
+    if (typeof sentenceText !== 'string' || sentenceText.trim().length === 0) {
+      issues.push('hard');
+      continue;
+    }
 
     const begin = readTime(field(sentence, 'begin_time'));
     const end = readTime(field(sentence, 'end_time'));
-    if (begin.kind !== 'value' || end.kind !== 'value') return invalid();
-    if (begin.ms < 0 || end.ms > audio.duration_ms || begin.ms >= end.ms) return invalid();
+    if (begin.kind !== 'value' || end.kind !== 'value') {
+      issues.push('hard');
+      continue;
+    }
+    if (begin.ms < 0 || end.ms > audio.duration_ms || begin.ms >= end.ms) {
+      issues.push('hard');
+      continue;
+    }
 
     const wordsValue = field(sentence, 'words');
-    if (wordsValue === undefined || wordsValue === null) return timingUnavailable();
+    if (wordsValue === undefined || wordsValue === null) {
+      issues.push('missing_timing');
+      continue;
+    }
     const words = readArray(wordsValue, MAX_WORDS);
-    if (words === null) return invalid();
-    if (words.length === 0) return timingUnavailable();
+    if (words === null) {
+      issues.push('hard');
+      continue;
+    }
+    if (words.length === 0) {
+      issues.push('missing_timing');
+      continue;
+    }
     totalWords += words.length;
-    if (totalWords > MAX_WORDS) return invalid();
+    if (totalWords > MAX_WORDS) {
+      issues.push('hard');
+      continue;
+    }
 
-    const units: TimedUnit[] = [];
+    const units: ParsedUnit[] = [];
     for (const rawWord of words) {
       const word = readRecord(rawWord);
-      if (word === null) return invalid();
+      if (word === null) {
+        issues.push('hard');
+        continue;
+      }
 
       const wordText = field(word, 'text');
-      if (typeof wordText !== 'string' || wordText.trim().length === 0) return invalid();
+      if (typeof wordText !== 'string' || wordText.trim().length === 0) {
+        issues.push('hard');
+        continue;
+      }
 
       const wordBegin = readTime(field(word, 'begin_time'));
       const wordEnd = readTime(field(word, 'end_time'));
-      if (wordBegin.kind === 'missing' || wordEnd.kind === 'missing') return timingUnavailable();
-      if (wordBegin.kind !== 'value' || wordEnd.kind !== 'value') return invalid();
-      if (wordBegin.ms < begin.ms || wordEnd.ms > end.ms || wordBegin.ms >= wordEnd.ms) {
-        return invalid();
+      if (wordBegin.kind === 'missing' || wordEnd.kind === 'missing') {
+        issues.push('missing_timing');
+        continue;
+      }
+      if (wordBegin.kind !== 'value' || wordEnd.kind !== 'value') {
+        issues.push('hard');
+        continue;
+      }
+      if (wordBegin.ms < begin.ms || wordEnd.ms > end.ms) {
+        issues.push('hard');
+        continue;
+      }
+      if (wordBegin.ms === wordEnd.ms) {
+        issues.push('zero_length');
+        continue;
+      }
+      if (wordBegin.ms > wordEnd.ms) {
+        issues.push('hard');
+        continue;
       }
 
       const punctuation = field(word, 'punctuation');
       if (punctuation !== undefined && punctuation !== null && typeof punctuation !== 'string') {
-        return invalid();
+        issues.push('hard');
+        continue;
       }
 
       units.push({
         text: wordText,
         granularity: granularityFor(wordText),
-        timing: availableTiming(wordBegin.ms, wordEnd.ms),
+        beginMs: wordBegin.ms,
+        endMs: wordEnd.ms,
       });
     }
 
+    let emotionLabel: string | null = null;
+    const emotion = field(sentence, 'emotion');
+    if (emotion !== undefined && emotion !== null) {
+      if (typeof emotion !== 'string') {
+        issues.push('hard');
+      } else if (emotion.length > 0) {
+        emotionLabel = emotion;
+      }
+    }
+
+    sentences.push({ sentenceText, beginMs: begin.ms, endMs: end.ms, units, emotionLabel });
+  }
+
+  return { issues, transcriptText, silence: false, sentences };
+}
+
+/**
+ * Assemble a validated AnnotatedAudio from a defect-free scan under a model
+ * policy. Native qwen emotion labels and their sentence timings are preserved
+ * verbatim (no invented score); the Paraformer policy reports emotion/prosody/
+ * sound-event unavailable and ignores unexpected emotion fields.
+ */
+function buildAnnotation(outcome: ScanOutcome, audio: AudioAsset, policy: ModelPolicy): Mapped {
+  const segments: TranscriptSegment[] = [];
+  const observations: Observation[] = [];
+  let labeled = 0;
+
+  for (let index = 0; index < outcome.sentences.length; index += 1) {
+    const sentence = outcome.sentences[index];
+    const units: TimedUnit[] = [];
+    for (const unit of sentence.units) {
+      units.push({
+        text: unit.text,
+        granularity: unit.granularity,
+        timing: availableTiming(unit.beginMs, unit.endMs, policy.timingSource),
+      });
+    }
     const segmentId = `seg-${index}`;
     segments.push({
       segment_id: segmentId,
-      text: sentenceText,
-      timing: availableTiming(begin.ms, end.ms),
+      text: sentence.sentenceText,
+      timing: availableTiming(sentence.beginMs, sentence.endMs, policy.timingSource),
       units,
     });
 
-    const emotion = field(sentence, 'emotion');
-    if (emotion !== undefined && emotion !== null) {
-      if (typeof emotion !== 'string') return invalid();
-      if (emotion.length > 0) {
-        observations.push({
-          observation_id: `emotion-${labeledSentences}`,
-          kind: 'emotion',
-          label: emotion,
-          timing: availableTiming(begin.ms, end.ms),
-          source_provider: SOURCE_PROVIDER,
-          source_model: FILETRANS_MODEL,
-          segment_ids: [segmentId],
-        });
-        labeledSentences += 1;
-      }
+    if (policy.emotionMode === 'qwen' && sentence.emotionLabel !== null && sentence.emotionLabel.length > 0) {
+      observations.push({
+        observation_id: `emotion-${labeled}`,
+        kind: 'emotion',
+        label: sentence.emotionLabel,
+        timing: availableTiming(sentence.beginMs, sentence.endMs, policy.timingSource),
+        source_provider: SOURCE_PROVIDER,
+        source_model: policy.model,
+        segment_ids: [segmentId],
+      });
+      labeled += 1;
     }
   }
 
   const capabilities: Capabilities = {
-    word_timing: okCapability(),
+    word_timing: okCapability(policy.model),
     emotion:
-      labeledSentences > 0
-        ? okCapability()
-        : { status: 'unavailable', reason: EMOTION_UNAVAILABLE_REASON },
-    prosody: { status: 'unavailable', reason: PROSODY_UNAVAILABLE_REASON },
-    sound_event: { status: 'unavailable', reason: SOUND_EVENT_UNAVAILABLE_REASON },
+      policy.emotionMode === 'paraformer' || (!outcome.silence && labeled === 0)
+        ? { status: 'unavailable', reason: policy.emotionUnavailableReason }
+        : okCapability(policy.model),
+    prosody: { status: 'unavailable', reason: policy.prosodyReason },
+    sound_event: { status: 'unavailable', reason: policy.soundEventReason },
   };
 
   return finalize(
     {
       schema_version: '0.1',
       asset_id: audio.asset_id,
-      transcript: transcriptText,
-      segments,
-      observations,
+      transcript: outcome.silence ? '' : outcome.transcriptText,
+      segments: outcome.silence ? [] : segments,
+      observations: outcome.silence ? [] : observations,
       capabilities,
     },
     audio,
   );
+}
+
+/**
+ * Native qwen3-asr-flash-filetrans mapper. Behavior is unchanged from the
+ * original-waveform contract: the FIRST defect in traversal order decides the
+ * failure (missing timing -> `timing_unavailable`; malformed structure or a
+ * zero-length/reversed/out-of-clip word -> `invalid_result`), and a fully valid
+ * payload (including successful silence) is finalized against the domain schema.
+ */
+export function mapFiletransResult(
+  raw: unknown,
+  asset: AudioAsset,
+): { ok: true; value: AnnotatedAudio } | { ok: false; error: AnalysisFailure } {
+  const validatedAsset = validateAudioAsset(asset);
+  if (!validatedAsset.ok) return invalidAudio();
+  const audio = validatedAsset.value;
+
+  const outcome = scanTranscriptPayload(raw, audio);
+  if (outcome.issues.length > 0) {
+    return outcome.issues[0] === 'missing_timing' ? timingUnavailable() : invalidResult();
+  }
+  return buildAnnotation(outcome, audio, QWEN_POLICY);
+}
+
+/**
+ * Paraformer-v2 timing-calibration mapper. It requires fully valid, strictly
+ * positive word timing (a calibration source has no timing-optional semantics
+ * and no secondary fallback), preserves provider granularity, stamps units,
+ * segments and the word_timing capability with the Paraformer provenance, and
+ * always reports emotion/prosody/sound-event unavailable even if unexpected
+ * emotion fields appear in the payload.
+ */
+export function mapParaformerResult(
+  raw: unknown,
+  asset: AudioAsset,
+): { ok: true; value: AnnotatedAudio } | { ok: false; error: AnalysisFailure } {
+  const validatedAsset = validateAudioAsset(asset);
+  if (!validatedAsset.ok) return invalidAudio();
+  const audio = validatedAsset.value;
+
+  const outcome = scanTranscriptPayload(raw, audio);
+  if (outcome.issues.length > 0) {
+    return failure('invalid_result', PARAFORMER_INVALID_MESSAGE);
+  }
+  return buildAnnotation(outcome, audio, PARAFORMER_POLICY);
+}
+
+/**
+ * Whole-payload eligibility probe used by the transport. It returns the shared
+ * failure shape when anything is structurally invalid, and otherwise reports
+ * whether the ONLY defects are calibration-resolvable timing defects.
+ *
+ * `needs_calibration === true` means the payload is otherwise well-formed and the
+ * sole defect is a missing/empty word array, a missing word time, or an
+ * equal otherwise-valid word boundary (D20). A genuine defect (malformed field,
+ * negative/non-integer/reversed/out-of-clip bound, missing/invalid sentence
+ * bounds, malformed structure, or a second defect after a zero-length unit) is a
+ * `hard` issue and NEVER qualifies. The transport still owns whether a calibration
+ * port is configured; this function performs no fusion and reports no timing plan.
+ */
+export type FiletransInspection =
+  | { ok: true; needs_calibration: boolean }
+  | { ok: false; error: AnalysisFailure };
+
+export function inspectFiletransResult(raw: unknown, asset: AudioAsset): FiletransInspection {
+  const validatedAsset = validateAudioAsset(asset);
+  if (!validatedAsset.ok) {
+    return { ok: false, error: { code: 'invalid_audio', stage: 'transcription', message: INVALID_AUDIO_MESSAGE, retryable: false } };
+  }
+  const audio = validatedAsset.value;
+
+  const outcome = scanTranscriptPayload(raw, audio);
+  if (outcome.issues.includes('hard')) return invalidResult();
+  if (outcome.issues.length > 0) return { ok: true, needs_calibration: true };
+  return { ok: true, needs_calibration: false };
 }
