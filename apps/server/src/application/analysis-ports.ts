@@ -117,3 +117,33 @@ export type AudioTimingCalibrationPort = {
     options: { readonly signal: AbortSignal },
   ): Promise<AnnotatedAudio>;
 };
+
+/**
+ * M02/D21 - provider-independent local audio analysis port.
+ *
+ * Lets an adapter analyze a stored clip directly: it may resolve the opaque
+ * `storage_key` against authorized local storage and submit inline bytes
+ * under the bounded caller-supplied `AbortSignal`. Unlike the publication +
+ * remote-reference flow (`AudioPublicationPort` plus `AudioAnalysisPort`),
+ * this port requires neither a signed remote reference nor temporary
+ * object-store publication.
+ *
+ * Contract:
+ * - Inputs must already have validated metadata and storage authorization.
+ *   A browser cannot supply filesystem paths; only the server resolves the
+ *   opaque key, and it never enters public annotation objects or logs.
+ * - Timing must preserve explicit provider-estimate provenance. An adapter
+ *   never claims forced alignment, never fabricates missing bounds and
+ *   never invokes a second recognizer silently; independent calibration
+ *   stays observable through `AudioTimingCalibrationPort`.
+ * - Sentence emotion links belong to the sentence span only. They are not
+ *   independent per-unit or per-character emotion.
+ * - Results follow the accepted `AnnotatedAudio` validation. Failures
+ *   surface as errors, never as a partially invented annotation.
+ */
+export type LocalAudioAnalysisPort = {
+  analyze(
+    audio: StoredAudio,
+    options: { readonly signal: AbortSignal },
+  ): Promise<AnnotatedAudio>;
+};
