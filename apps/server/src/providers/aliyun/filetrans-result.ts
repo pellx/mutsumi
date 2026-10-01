@@ -69,8 +69,8 @@ type IssueKind = 'hard' | 'missing_timing' | 'zero_length';
 type ParsedUnit = {
   text: string;
   granularity: TimingGranularity;
-  beginMs: number;
-  endMs: number;
+  beginMs: number | null;
+  endMs: number | null;
 };
 
 type ParsedSentence = {
@@ -272,75 +272,80 @@ function scanTranscriptPayload(raw: unknown, audio: AudioAsset): ScanOutcome {
       continue;
     }
 
+    const units: ParsedUnit[] = [];
     const wordsValue = field(sentence, 'words');
+    let wordsSkipped = false;
     if (wordsValue === undefined || wordsValue === null) {
       issues.push('missing_timing');
-      continue;
+      wordsSkipped = true;
     }
-    const words = readArray(wordsValue, MAX_WORDS);
-    if (words === null) {
-      issues.push('hard');
-      continue;
-    }
-    if (words.length === 0) {
-      issues.push('missing_timing');
-      continue;
-    }
-    totalWords += words.length;
-    if (totalWords > MAX_WORDS) {
-      issues.push('hard');
-      continue;
-    }
-
-    const units: ParsedUnit[] = [];
-    for (const rawWord of words) {
-      const word = readRecord(rawWord);
-      if (word === null) {
+    if (!wordsSkipped) {
+      const wordsArr = readArray(wordsValue, MAX_WORDS);
+      if (wordsArr === null) {
         issues.push('hard');
-        continue;
-      }
-
-      const wordText = field(word, 'text');
-      if (typeof wordText !== 'string' || wordText.trim().length === 0) {
-        issues.push('hard');
-        continue;
-      }
-
-      const wordBegin = readTime(field(word, 'begin_time'));
-      const wordEnd = readTime(field(word, 'end_time'));
-      if (wordBegin.kind === 'missing' || wordEnd.kind === 'missing') {
+        wordsSkipped = true;
+      } else if (wordsArr.length === 0) {
         issues.push('missing_timing');
-        continue;
-      }
-      if (wordBegin.kind !== 'value' || wordEnd.kind !== 'value') {
-        issues.push('hard');
-        continue;
-      }
-      if (wordBegin.ms < begin.ms || wordEnd.ms > end.ms) {
-        issues.push('hard');
-        continue;
-      }
-      if (wordBegin.ms === wordEnd.ms) {
-        issues.push('zero_length');
-        continue;
-      }
-      if (wordBegin.ms > wordEnd.ms) {
-        issues.push('hard');
-        continue;
-      }
+        wordsSkipped = true;
+      } else {
+        totalWords += wordsArr.length;
+        if (totalWords > MAX_WORDS) {
+          issues.push('hard');
+          wordsSkipped = true;
+        } else {
+          for (const rawWord of wordsArr) {
+            const word = readRecord(rawWord);
+            if (word === null) {
+              issues.push('hard');
+              continue;
+            }
 
-      const punctuation = field(word, 'punctuation');
-      if (punctuation !== undefined && punctuation !== null && typeof punctuation !== 'string') {
-        issues.push('hard');
-        continue;
-      }
+            const wordText = field(word, 'text');
+            if (typeof wordText !== 'string' || wordText.trim().length === 0) {
+              issues.push('hard');
+              continue;
+            }
 
-      units.push({
-        text: wordText,
-        granularity: granularityFor(wordText),
-        beginMs: wordBegin.ms,
-        endMs: wordEnd.ms,
-      });
+            const wordBegin = readTime(field(word, 'begin_time'));
+            const wordEnd = readTime(field(word, 'end_time'));
+            let resolvedBegin: number | null = null;
+            let resolvedEnd: number | null = null;
+
+            if (wordBegin.kind === 'invalid' || wordEnd.kind === 'invalid') {
+              issues.push('hard');
+            } else {
+              if (wordBegin.kind === 'value') resolvedBegin = wordBegin.ms;
+              if (wordEnd.kind === 'value') resolvedEnd = wordEnd.ms;
+
+              const beginOut = resolvedBegin !== null && (resolvedBegin < 0 || resolvedBegin < begin.ms);
+              const endOut = resolvedEnd !== null && (resolvedEnd < 0 || resolvedEnd > end.ms);
+              if (beginOut || endOut) {
+                issues.push('hard');
+              } else if (resolvedBegin !== null && resolvedEnd !== null) {
+                if (resolvedBegin > resolvedEnd) {
+                  issues.push('hard');
+                } else if (resolvedBegin === resolvedEnd) {
+                  issues.push('zero_length');
+                }
+              } else {
+                issues.push('missing_timing');
+              }
+            }
+
+            const punctuation = field(word, 'punctuation');
+            if (punctuation !== undefined && punctuation !== null && typeof punctuation !== 'string') {
+              issues.push('hard');
+            }
+
+            units.push({
+              text: wordText,
+              granularity: granularityFor(wordText),
+              beginMs: resolvedBegin,
+              endMs: resolvedEnd,
+            });
+          }
+        }
+      }
     }
 
     let emotionLabel: string | null = null;
@@ -374,6 +379,9 @@ function buildAnnotation(outcome: ScanOutcome, audio: AudioAsset, policy: ModelP
     const sentence = outcome.sentences[index];
     const units: TimedUnit[] = [];
     for (const unit of sentence.units) {
+      if (unit.beginMs === null || unit.endMs === null) {
+        return invalidResult();
+      }
       units.push({
         text: unit.text,
         granularity: unit.granularity,
