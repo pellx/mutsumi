@@ -1,0 +1,6 @@
+# M03 HTTP guard duplicate headers and exception accessors
+Edit ONLY apps/server/src/main.ts once, no other edit/Git/.env/data/harness/cloud. Read ONLY that file. Preserve all routes/bootstrap/public types.
+Supervisor review: singleHeader(req.headers.host) cannot detect duplicate Host because Node discards duplicate raw Host headers. At beginning guard (after securityheaders), count req.rawHeaders case-insensitive for host,origin,sec-fetch-site; if anycount>1 return static403 invalid_input BEFORE parser. Don't output header contents.
+numericStatusOf currently executes foreign status/statusCode getters. Read Object.getOwnPropertyDescriptor and accept ONLY own data descriptor.value integer; never invoke accessor. frameworkStatusOf must not invoke a foreign subclass override of getStatus; obtain own data status for instanceof HttpException via same safe helper (framework stores own status), then fallback parser-own-data classifier as before. Foreign accessor objects should yield safeprovider_failed and zero getters. Preserve static message/status maps, bodyparser handling and ownederror branding; no exceptionmessage/getResponse read.
+One successful write then npm run typecheck; stop. Supervisor tests raw duplicateheaders at localhost, foreignaccessors/subclass overrides, existing fullHTTP checks, no cloud.
+
