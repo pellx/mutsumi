@@ -50,20 +50,39 @@ const configs = {
   'model_providers.deepseek.supports_websockets': false,
   'model_providers.deepseek.request_max_retries': 1,
   'model_providers.deepseek.stream_max_retries': 1,
-  'shell_environment_policy.exclude': ['DEEPSEEK_API_KEY'],
+  'shell_environment_policy.exclude': ['DEEPSEEK_API_KEY', 'DASHSCOPE_API_KEY', 'OPENAI_API_KEY'],
 };
 const args = ['exec', '--ignore-user-config', '--ephemeral', '--json', '--color', 'never', '-C', root, '-s', 'workspace-write', '-m', model];
 for (const [name, value] of Object.entries(configs)) args.push('-c', `${name}=${JSON.stringify(value)}`);
 args.push('-');
 const env = { ...process.env, DEEPSEEK_API_KEY: key };
 delete env.OPENAI_API_KEY;
+delete env.DASHSCOPE_API_KEY;
 const outputDir = path.join(root, '.runtime/harness-runs', new Date().toISOString().replaceAll(':', '-'));
 await mkdir(outputDir, { recursive: true });
 const child = spawn(executable, args, { cwd: root, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
-let stdout = '', stderr = '', timedOut = false, overflow = false;
+let stdout = '', stderr = '', progressBuffer = '', timedOut = false, overflow = false, connectionFailures = 0, connectionFailed = false;
 const limit = 4 * 1024 * 1024;
-child.stdout.on('data', chunk => { stdout += chunk; if (stdout.length > limit) { overflow = true; child.kill(); } });
-child.stderr.on('data', chunk => { stderr += chunk; if (stderr.length > limit) { overflow = true; child.kill(); } });
+child.stdout.on('data', chunk => {
+  stdout += chunk;
+  if (stdout.length > limit) { overflow = true; child.kill(); return; }
+  progressBuffer += chunk;
+  const lines = progressBuffer.split('\n');
+  progressBuffer = lines.pop() || '';
+  for (const line of lines) {
+    try { const e = JSON.parse(line); if (e.type === 'item.completed' && e.item?.type === 'command_execution') console.log(JSON.stringify({progress:'tool_completed',exit_code:e.item.exit_code})); } catch {}
+  }
+});
+child.stderr.on('data', chunk => {
+  stderr += chunk;
+  if (stderr.length > limit) { overflow = true; child.kill(); return; }
+  connectionFailures = (stderr.match(/stream connection failed/g) || []).length;
+  if (connectionFailures >= 2 && !connectionFailed) {
+    connectionFailed = true;
+    console.log(JSON.stringify({status:'stopping',reason:'repeated_connection_failure'}));
+    child.kill();
+  }
+});
 child.stdin.on('error', () => {});
 const timer = setTimeout(() => { timedOut = true; child.kill(); }, 300000);
 const completion = new Promise((resolve, reject) => { child.on('error', reject); child.on('close', (code, signal) => resolve({ code, signal })); });
@@ -72,7 +91,7 @@ console.log(JSON.stringify({ status: 'started', model, provider: endpoint.hostna
 let result;
 try { result = await completion; } finally { clearTimeout(timer); }
 const events = stdout.split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(redact(line)); } catch { return { type: 'unparsed', text: redact(line) }; } });
-const report = { ...result, model, provider: endpoint.hostname, cli: version.stdout.trim(), task: relative, timedOut, overflow, events, stderr: redact(stderr) };
+const report = { ...result, model, provider: endpoint.hostname, cli: version.stdout.trim(), task: relative, timedOut, overflow, connectionFailed, events, stderr: redact(stderr) };
 await writeFile(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2));
-console.log(JSON.stringify({ ...result, model, timedOut, overflow, report_path: path.join(outputDir, 'report.json'), event_types: events.map(e => e.type), final_messages: events.filter(e => e.item?.type === 'agent_message').map(e => e.item.text), stderr: redact(stderr).slice(-3000) }));
-process.exitCode = result.code === 0 && !timedOut && !overflow ? 0 : 1;
+console.log(JSON.stringify({ ...result, model, timedOut, overflow, connectionFailed, report_path: path.join(outputDir, 'report.json'), event_types: events.map(e => e.type), final_messages: events.filter(e => e.item?.type === 'agent_message').map(e => e.item.text), stderr: redact(stderr).slice(-3000) }));
+process.exitCode = result.code === 0 && !timedOut && !overflow && !connectionFailed ? 0 : 1;
