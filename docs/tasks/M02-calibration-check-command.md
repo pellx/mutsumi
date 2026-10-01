@@ -1,0 +1,5 @@
+# M02 include calibration regression in the default check — Qwen
+
+Only writable file: package.json. Exactly ONE surgical write; supervisor immediately commits. Read AGENTS.md, voice-system-flow.md, docs/architecture.md and this brief; only additional read is package.json. No discovery, source/test reads, private .env/data/.runtime, temporary files, cloud calls, delegation, Git mutations or escalation. Owner requires Qwen only. Native PowerShell 7.
+
+All 28 new timing-calibration tests now independently pass. Append tests/acceptance/timing-calibration.test.mjs exactly once to scripts.test, preserving the existing four files/order and node --test runner. Keep scripts.typecheck, every other script, name/version/dependencies and formatting unchanged; no lockfile change. Construct proposed content in memory, verify the old search text exists exactly once and resulting JSON parses before one write. Keep LF/CRLF handling correct. After write validate JSON and read back scripts.test; supervisor runs full npm run check. Report actual outcome/commit suggestion. Do not start another feature or push: owner wants to inspect this repair first.
