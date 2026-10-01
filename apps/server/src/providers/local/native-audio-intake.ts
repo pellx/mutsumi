@@ -188,7 +188,7 @@ function snapshotDeclaredMediaType(submission: unknown): string | null {
 }
 
 function readSeconds(value: unknown): number | null {
-  if (value === undefined || value === null) return null;
+  if (value === undefined) return null;
   let text: string;
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) return invalid();
@@ -198,7 +198,8 @@ function readSeconds(value: unknown): number | null {
   } else {
     return invalid();
   }
-  if (text === '' || text.toUpperCase() === 'N/A') return null;
+  if (text.toUpperCase() === 'N/A') return null;
+  if (text === '') return invalid();
   if (!DECIMAL_PATTERN.test(text)) return invalid();
   const seconds = Number(text);
   if (!Number.isFinite(seconds) || seconds <= 0) return invalid();
@@ -206,7 +207,7 @@ function readSeconds(value: unknown): number | null {
 }
 
 function readCount(value: unknown): number | null {
-  if (value === undefined || value === null) return null;
+  if (value === undefined) return null;
   let text: string;
   if (typeof value === 'number') {
     if (!Number.isSafeInteger(value)) return invalid();
@@ -216,7 +217,8 @@ function readCount(value: unknown): number | null {
   } else {
     return invalid();
   }
-  if (text === '' || text.toUpperCase() === 'N/A') return null;
+  if (text.toUpperCase() === 'N/A') return null;
+  if (text === '') return invalid();
   if (!INTEGER_PATTERN.test(text)) return invalid();
   const count = Number(text);
   if (!Number.isSafeInteger(count) || count <= 0 || count > MAX_COUNT) return invalid();
