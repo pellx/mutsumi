@@ -1,0 +1,17 @@
+# M02 Qwen Audio timing repair after supervisor review
+
+Target ONLY apps/server/src/providers/aliyun/qwen-audio-timing.ts; already committed draft 3eb3192. Exactly one write, gpt-6-luna. Read target and application/input-stage-ports.ts; optional filetrans-result.ts and domain/annotation.ts only. No other edits or private/credential access. Owner-selected D27 model stays fixed.
+
+Repair all TypeScript errors: TimingPort and UntimedTranscription come from input-stage-ports.js; AnalysisFailure and publication types remain analysis-ports.js. Unknown lexical values must be properly narrowed (not unsafe casts); getResult requires nonnull output. Run the assigned typecheck after write, stop even on errors.
+
+Additional supervisor acceptance corrections in same single write:
+- lexical removal ignores ONLY Unicode punctuation and whitespace, not everything except letters/numbers. Preserve symbols/combining marks and reject genuine differences. Reuse a shared isIgnoredCodePoint helper in remapping.
+- BEFORE publication validate snapshot ref transcript typeof string and <=6000, source provider/model nonblank strings, asset agreement, events array <=32 each kind sound_event label nonblank<=256, valid observations and capability using domain validator. Keep exact original text. No malformed reference may reach publication. Input key opaque pattern /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.
+- Share reference validation between align and exported pure mapper. Context length >400 throws static owned invalid_result with useful static context-too-long message before network; never truncate.
+- For missing words or missing begin_time/end_time on otherwise structurally valid mapped speech, report timing_unavailable. Existing mapParaformerResult reports generic invalid_result; inspect raw safely to distinguish only this case, preserving invalid_result for zero/reversed/out-of-bounds or lexical mismatch. Never trust foreign getters/errors. Generic mapper reuse is offline parsing only.
+- readJson always performs best-effort cancel and releaseLock in finally, on success/failure/deadline, without waiting on cleanup. Use fatal UTF8. Keep response byte caps.
+- Poll sleep must cancel its timer/listener immediately on abort, and dispose after resolve; racing an uncancelled setTimeout leaves a process alive. Preserve shared deadline and bounded polling.
+- Capture/bind publication.publish once in constructor, so later mutations to supplied object do not change configured transport. Validate existing config null safely with static config errors. No API/proxy/global changes.
+- emotion unavailable reason must correctly say separate emotion stage (not transcription stage). Keep native timing provenance and zero Paraformer calls/fallback.
+
+Build entire replacement or anchored changes in memory, verify anchors and all proposed fixes before SINGLE write. Do not create scripts/tests/tempfiles. Run node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json once read-only after write. Report check and stop; supervisor performs immediate exact-file commit.
