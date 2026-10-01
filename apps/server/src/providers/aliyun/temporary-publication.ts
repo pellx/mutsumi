@@ -394,12 +394,13 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
     const deadline = createDeadline(options.signal, this.#timeoutMs);
     try {
       const check = this.#validateInput(audio);
-      if (options.model !== FILETRANS_MODEL) throw modelMismatch();
+      const model = options.model;
+      if (model !== FILETRANS_MODEL && model !== PARAFORMER_MODEL) throw modelMismatch();
       throwIfAborted(deadline);
       const blob = await this.#loadAudio(check.key, deadline);
       const loaded = this.#verifyAudio(check, blob);
       throwIfAborted(deadline);
-      const reference = await this.#runPublish(loaded, deadline);
+      const reference = await this.#runPublish(loaded, deadline, model);
       throwIfAborted(deadline);
       return reference;
     } catch (error: unknown) {
@@ -444,8 +445,8 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
   }
 
   /** Retrieve the upload policy, enforce the effective size limit, upload, build the reference. */
-  async #runPublish(audio: LoadedAudio, deadline: Deadline): Promise<RemoteAudioReference> {
-    const policy = await this.#requestPolicy(deadline);
+  async #runPublish(audio: LoadedAudio, deadline: Deadline, model: string): Promise<RemoteAudioReference> {
+    const policy = await this.#requestPolicy(deadline, model);
     throwIfAborted(deadline);
     const sizeLimit = Math.min(this.#maxBytes, policy.maxBytes);
     if (audio.blob.size > sizeLimit) throw invalidAudio();
@@ -467,15 +468,15 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
     const expiresAt = policy.mediaExpiresAt;
     return {
       uri: `oss://${objectKey}`,
-      model: FILETRANS_MODEL,
+      model,
       expires_at_ms: expiresAt,
       transport: 'oss-resource',
     };
   }
 
   /** GET the upload policy with a bounded body read and abort-aware waits. */
-  async #requestPolicy(deadline: Deadline): Promise<UploadPolicy> {
-    const url = `${UPLOAD_POLICY_URL}?action=getPolicy&model=${encodeURIComponent(FILETRANS_MODEL)}`;
+  async #requestPolicy(deadline: Deadline, model: string): Promise<UploadPolicy> {
+    const url = `${UPLOAD_POLICY_URL}?action=getPolicy&model=${encodeURIComponent(model)}`;
     const response = await this.#fetchGuarded(
       url,
       {
