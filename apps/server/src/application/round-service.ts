@@ -60,6 +60,9 @@ const MAX_CLIP_BYTES = 10 * 1024 * 1024;
 const MAX_MIME_LENGTH = 128;
 const MAX_SOURCE_DURATION_MS = 30_250;
 const MAX_ANALYSIS_DURATION_MS = 30_000;
+const ANALYSIS_MEDIA_TYPE = 'audio/wav';
+const ANALYSIS_SAMPLE_RATE_HZ = 16_000;
+const ANALYSIS_CHANNELS = 1;
 const MAX_JOBS = 256;
 const STORE_TIMEOUT_MS = 2_000;
 const DEFAULT_DEADLINE_MS = 120_000;
@@ -226,20 +229,26 @@ function buildTurnRecord(
 /**
  * Race a port promise against the shared round signal so an uncooperative
  * provider cannot hold the round open. A rejection handler is always attached,
- * so a late settle neither mutates state nor becomes an unhandled rejection.
+ * so a late settle neither mutates state nor becomes an unhandled rejection:
+ * the already-aborted path observes the abandoned promise before it rejects.
  */
 function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) {
+    // A port that aborts synchronously may still return an already-rejected (or
+    // later-rejected) promise; observe and ignore it so no unhandled rejection
+    // escapes while the round only records its own cancellation.
+    void Promise.resolve(promise).then(undefined, () => {});
     return Promise.reject(signal.reason);
   }
   return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
-      reject(signal.reason);
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
     const detach = (): void => {
       signal.removeEventListener('abort', onAbort);
     };
+    const onAbort = (): void => {
+      detach();
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
     promise.then(
       (value) => {
         detach();
@@ -281,12 +290,18 @@ function isValidMime(value: string): boolean {
 }
 
 function sessionMatchesMode(sessionId: string, mode: RuntimeMode): boolean {
-  const prefix = mode === 'live' ? 'owner-live' : 'owner-development-mock';
-  return sessionId.startsWith(prefix);
+  const expected = mode === 'live' ? 'owner-live' : 'owner-development-mock';
+  return sessionId === expected;
 }
 
 function fingerprintOf(bytes: Uint8Array, mime: string): string {
-  return createHash('sha256').update(bytes).update(mime, 'utf8').digest('hex');
+  const hash = createHash('sha256');
+  // Frame the byte length first so the bytes tail and the media type cannot be
+  // re-split ambiguously across two different (bytes, mime) pairs.
+  hash.update(`${bytes.byteLength}:`, 'utf8');
+  hash.update(bytes);
+  hash.update(mime, 'utf8');
+  return hash.digest('hex');
 }
 
 function acceptStoredAudio(value: unknown): StoredAudio {
@@ -294,8 +309,12 @@ function acceptStoredAudio(value: unknown): StoredAudio {
   if (record === null) throw makeRoundError('invalid_result', 'intake');
   const checked = validateAudioAsset(record['asset']);
   if (!checked.ok) throw makeRoundError('invalid_result', 'intake');
+  const assetId = checked.value.asset_id;
+  if (!UUID_V4_PATTERN.test(assetId)) {
+    throw makeRoundError('invalid_result', 'intake');
+  }
   const storageKey = record['storage_key'];
-  if (typeof storageKey !== 'string' || !UUID_V4_PATTERN.test(storageKey)) {
+  if (typeof storageKey !== 'string' || storageKey !== assetId) {
     throw makeRoundError('invalid_result', 'intake');
   }
   return { asset: structuredClone(checked.value), storage_key: storageKey };
@@ -308,6 +327,13 @@ function acceptIntakeResult(raw: unknown): { original: StoredAudio; analysis: St
   const original = acceptStoredAudio(record['original']);
   const analysis = acceptStoredAudio(record['analysis']);
   if (original.asset.asset_id === analysis.asset.asset_id) {
+    throw makeRoundError('invalid_result', 'intake');
+  }
+  if (
+    analysis.asset.media_type !== ANALYSIS_MEDIA_TYPE
+    || analysis.asset.sample_rate_hz !== ANALYSIS_SAMPLE_RATE_HZ
+    || analysis.asset.channels !== ANALYSIS_CHANNELS
+  ) {
     throw makeRoundError('invalid_result', 'intake');
   }
   if (
@@ -543,6 +569,7 @@ export class RoundService {
       const raw = await raceAbort(this.analysis.analyze(analysisStored, { signal }), signal);
       const checked = validateAnnotatedAudio(raw, inputAsset);
       if (!checked.ok) throw makeRoundError('invalid_result', 'analysis');
+      this.assertAnnotationJsonSafe(entry, intake.original.asset, inputAsset, checked.value);
       return structuredClone(checked.value);
     });
     if (!analysisOutcome.ok) {
@@ -636,11 +663,52 @@ export class RoundService {
     signal: AbortSignal | undefined,
     run: () => Promise<T>,
   ): Promise<StageResult<T>> {
+    if (signal !== undefined && signal.aborted) {
+      return { ok: false, failure: toRoundFailure(signal.reason, name, signal) };
+    }
     try {
       const value = await run();
       return { ok: true, value };
     } catch (error) {
       return { ok: false, failure: toRoundFailure(error, name, signal) };
+    }
+  }
+
+  /**
+   * Reject an accepted annotation that the strict turn-record JSON preflight
+   * would refuse later (for example an explicitly `undefined` optional field,
+   * which the annotation validator tolerates). It runs the same bounded
+   * preflight used for storage against a provisional record that keeps the safe
+   * source/input metadata and the raw annotation while every other part is null,
+   * so an invalid annotation fails at analysis and the valid intake record stays
+   * available instead of being lost at storage time.
+   */
+  private assertAnnotationJsonSafe(
+    entry: JobEntry,
+    sourceAsset: AudioAsset,
+    inputAsset: AudioAsset,
+    annotation: AnnotatedAudio,
+  ): void {
+    const provisional = buildTurnRecord(
+      entry.job,
+      entry.created_at_ms,
+      this.mode,
+      {
+        sourceAsset,
+        inputAsset,
+        annotation,
+        draft: null,
+        plan: null,
+        outputAsset: null,
+        outputAlignment: null,
+        appliedControls: [],
+        unsupportedControls: [],
+      },
+      { intake: { status: 'ok' }, analysis: { status: 'ok' } },
+      null,
+    );
+    if (!validateTurnRecord(provisional).ok) {
+      throw makeRoundError('invalid_result', 'analysis');
     }
   }
 
@@ -799,7 +867,7 @@ export class RoundService {
     ) {
       throw makeRoundError('invalid_result', 'storage');
     }
-    if (typeof turnId !== 'string' || !ID_PATTERN.test(turnId)) {
+    if (typeof turnId !== 'string' || !UUID_V4_PATTERN.test(turnId)) {
       throw makeRoundError('invalid_result', 'storage');
     }
     return { sessionId, turnId };
