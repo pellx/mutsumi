@@ -491,7 +491,7 @@ export class OhMyGptAudioAnalysis implements LocalAudioAnalysisPort {
       model: GEMINI_AUDIO_MODEL,
       stream: false,
       n: 1,
-      max_tokens: 4096,
+      max_tokens: 65536,
       reasoning_effort: 'low',
       store: false,
       messages: [
