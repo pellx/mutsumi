@@ -67,7 +67,7 @@ const configs = {
   'model_providers.qwen.supports_websockets': false,
   'model_providers.qwen.request_max_retries': 1,
   'model_providers.qwen.stream_max_retries': 1,
-  'shell_environment_policy.exclude': ['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+  'shell_environment_policy.exclude': ['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENROUTER_API_KEY', 'OHMYGPT_API_KEY'],
 };
 const args = ['exec', '--ignore-user-config', '--ephemeral', '--json', '--color', 'never', '-C', root, '-s', 'workspace-write', '-m', model];
 for (const [name, value] of Object.entries(configs)) args.push('-c', `${name}=${JSON.stringify(value)}`);
@@ -77,6 +77,8 @@ delete env.DEEPSEEK_API_KEY;
 delete env.OPENAI_API_KEY;
 delete env.GEMINI_API_KEY;
 delete env.GOOGLE_API_KEY;
+delete env.OPENROUTER_API_KEY;
+delete env.OHMYGPT_API_KEY;
 // Windows reqwest also discovers the user's system proxy without *_PROXY env
 // variables. That route failed for DashScope while direct HTTPS worked. Exempt
 // only the selected Alibaba host in this child; retain other inherited routes
