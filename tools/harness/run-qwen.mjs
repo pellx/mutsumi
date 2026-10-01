@@ -45,7 +45,9 @@ const taskPath = await realpath(path.resolve(root, taskArg));
 const taskRoot = await realpath(path.join(root, 'docs/tasks'));
 const task = path.relative(taskRoot, taskPath);
 if (task.startsWith('..') || path.isAbsolute(task) || !task.endsWith('.md')) throw new Error('Task must be inside docs/tasks');
-const prompt = 'The supervisor, not the implementing agent, performs the immediate per-file Git commit required by AGENTS.md. Do not run git add/commit/reset/checkout or any other Git mutation. Do not invoke tools/harness, harness:check, launchers, .env loaders or any other credential-reading script, even for verification. After your single file write and the exact read-only checks in the brief, report and stop.\n\n' + await readFile(taskPath, 'utf8');
+const contextNames = ['AGENTS.md', 'voice-system-flow.md', 'docs/architecture.md', 'docs/sleep-work-plan.md'];
+const context = await Promise.all(contextNames.map(async name => `## Preloaded context: ${name}\n${await readFile(path.join(root, name), 'utf8')}`));
+const prompt = 'The supervisor, not the implementing agent, performs the immediate per-file Git commit required by AGENTS.md. Do not run git add/commit/reset/checkout or any other Git mutation. Do not invoke tools/harness, harness:check, launchers, .env loaders or any other credential-reading script, even for verification. The four required context documents are supplied completely below; read them here before editing and do not reopen or search these same documents through tools. Read only the assigned source dependencies next. After your single file write and the exact read-only checks in the brief, report and stop.\n\n' + context.join('\n\n') + '\n\n## Assigned task\n' + await readFile(taskPath, 'utf8');
 const redact = text => text.split(key).join('[REDACTED]').replace(/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED]');
 const configs = {
   model_provider: 'qwen',
