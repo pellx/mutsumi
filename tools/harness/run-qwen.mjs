@@ -65,7 +65,7 @@ const configs = {
   'model_providers.qwen.supports_websockets': false,
   'model_providers.qwen.request_max_retries': 1,
   'model_providers.qwen.stream_max_retries': 1,
-  'shell_environment_policy.exclude': ['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY'],
+  'shell_environment_policy.exclude': ['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'],
 };
 const args = ['exec', '--ignore-user-config', '--ephemeral', '--json', '--color', 'never', '-C', root, '-s', 'workspace-write', '-m', model];
 for (const [name, value] of Object.entries(configs)) args.push('-c', `${name}=${JSON.stringify(value)}`);
@@ -73,6 +73,8 @@ args.push('-');
 const env = { ...process.env, DASHSCOPE_API_KEY: key };
 delete env.DEEPSEEK_API_KEY;
 delete env.OPENAI_API_KEY;
+delete env.GEMINI_API_KEY;
+delete env.GOOGLE_API_KEY;
 // Windows reqwest also discovers the user's system proxy without *_PROXY env
 // variables. That route failed for DashScope while direct HTTPS worked. Exempt
 // only the selected Alibaba host in this child; retain other inherited routes
@@ -118,7 +120,7 @@ process.once('SIGINT', cancel);
 process.once('SIGTERM', cancel);
 const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
 const completion = new Promise((resolve, reject) => { child.on('error', reject); child.on('close', (code, signal) => resolve({ code, signal })); });
-child.stdin.end(`Execute only this brief. Read AGENTS.md first and the required flow/architecture. Never read .env or enumerate environment variables. Do not inspect data/ or .runtime artifacts outside the brief's explicit target path. Read only required context and assigned source/test files; no speculative workspace discovery. The shell is PowerShell 7: use native Get-Content/Select-Object and rg; do not nest powershell/pwsh/bash or use Unix grep, wc, cat -n, or Bash heredocs. For multiline inline Node/Python, use a PowerShell single-quoted here-string piped directly to the interpreter. Do not delegate, discover connectors, edit unassigned files or call providers through shell. Stop after two identical infrastructure errors. Windows shell commands have an approximately 32 KiB hard limit: keep command strings below 20 KiB and avoid large whole-file shell payloads. Before a replacement write, build proposed content in memory and assert every required anchor matches exactly once and every requested change is present; never silently write a partial patch. Make exactly ONE successful write total, to the assigned target only; never re-edit, compact, format or fix the written file in this invocation. Never create temporary test scripts or any other file for verification, even if you would delete it later. Use inline/in-memory verification or run existing tests directly with Node (node --test workers may be EPERM-blocked). Supervisor commits before any next edit.\n\n${prompt}`);
+child.stdin.end(`Execute only this brief. Read AGENTS.md first and the required flow/architecture. Never read .env or enumerate environment variables. Do not inspect data/ or .runtime artifacts outside the brief's explicit target path. Read only required context and assigned source/test files; no speculative workspace discovery. Never recursively enumerate the workspace (including Get-ChildItem -Recurse or workspace-wide rg --files); inspect only the exact files named in the brief. Known setup: Node 25, root package.json, TypeScript at node_modules/typescript/bin/tsc. For erasable files use --noEmit --strict --allowImportingTsExtensions --target ES2022 --module NodeNext --moduleResolution NodeNext; value imports use explicit .ts, type imports may use .ts/.js. Do not search for a tsconfig unless the brief explicitly assigns one. Read required documents together in one command and do not repeatedly reread the domain validator for type-only work. The shell is PowerShell 7: use native Get-Content/Select-Object and rg; do not nest powershell/pwsh/bash or use Unix grep, wc, cat -n, or Bash heredocs. For multiline inline Node/Python, use a PowerShell single-quoted here-string piped directly to the interpreter. Do not delegate, discover connectors, edit unassigned files or call providers through shell. Stop after two identical infrastructure errors. Windows shell commands have an approximately 32 KiB hard limit: keep command strings below 20 KiB and avoid large whole-file shell payloads. Before a replacement write, build proposed content in memory and assert every required anchor matches exactly once and every requested change is present; never silently write a partial patch. Make exactly ONE successful write total, to the assigned target only; never re-edit, compact, format or fix the written file in this invocation. Never create temporary test scripts or any other file for verification, even if you would delete it later. Use inline/in-memory verification or run existing tests directly with Node (node --test workers may be EPERM-blocked). Supervisor commits before any next edit.\n\n${prompt}`);
 console.log(JSON.stringify({ status: 'started', model, effort, timeout_ms: timeoutMs, provider: endpoint.hostname, task }));
 let result;
 try { result = await completion; } finally { clearTimeout(timer); process.off('SIGINT', cancel); process.off('SIGTERM', cancel); }
