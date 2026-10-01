@@ -12,10 +12,12 @@
  * - A bounded read-only preflight walks the whole tree before any field is
  *   read. Cycles, accessors, symbol keys, non-enumerable own properties, class
  *   instances, sparse/decorated arrays and non-JSON values are rejected there,
- *   and nesting, value counts, array lengths, key counts and string lengths are
- *   bounded so adversarial input cannot force unbounded work. Plain objects and
- *   null-prototype records are accepted, and shared non-cyclic references are
- *   allowed. Arbitrary adversarial Proxy objects are outside the guarantee.
+ *   and nesting, per-occurrence value counts, array lengths, object key counts,
+ *   string lengths and the aggregate UTF-16 text budget are bounded so
+ *   adversarial input cannot force unbounded work; shared non-cyclic references
+ *   are inspected and counted at every serialized occurrence. Plain objects and
+ *   null-prototype records are accepted. Arbitrary adversarial Proxy objects
+ *   are outside the guarantee.
  * - Planned expression timing stays a plan: output alignment is measured timing
  *   for a real generated asset, or explicitly null. A completed round may
  *   legitimately keep alignment null.
@@ -46,6 +48,8 @@ const ROOT_PATH = '$';
 // Bounded preflight limits (JSON-tree safety, not part of the domain contract).
 const MAX_DEPTH = 16;
 const MAX_TOTAL_VALUES = 131_072;
+/** Aggregate UTF-16 units across every encountered string value and object key. */
+const MAX_TEXT_UNITS = 4_194_304;
 const MAX_ARRAY_LENGTH = 8_192;
 const MAX_OBJECT_KEYS = 32;
 const MAX_STRING_LENGTH = 65_536;
@@ -263,20 +267,48 @@ function checkEmptyControls(
 /**
  * Walk the whole tree without reading any field of a container that is not a
  * plain JSON record or an ordinary dense array. A `false` result means the
- * caller must not attempt field validation at all. Each distinct container is
- * inspected once, and containers currently on the walk stack identify cycles,
- * so shared non-cyclic references stay valid without unbounded work.
+ * caller must not attempt field validation at all. Serialization expands shared
+ * references, so every occurrence of a container is inspected and counted
+ * instead of being memoized by container identity; only the active walk stack is
+ * tracked, which still rejects reference cycles while keeping shared non-cyclic
+ * values valid. Crossing the total-value or aggregate-text budget stops the
+ * whole walk and reports one static issue.
  */
 function preflight(root: unknown, issues: ValidationIssue[]): boolean {
   const visiting = new Set<object>();
-  const visited = new Set<object>();
   let valueCount = 0;
-  let limitReported = false;
+  let textUnits = 0;
+  let valueLimitReported = false;
+  let textLimitReported = false;
+  let halted = false;
   let ok = true;
 
   const note = (path: string, message: string): void => {
     pushIssue(issues, path, message);
     ok = false;
+  };
+
+  const haltOnValueLimit = (): void => {
+    halted = true;
+    if (valueLimitReported === false) {
+      valueLimitReported = true;
+      note(ROOT_PATH, `turn record must contain at most ${MAX_TOTAL_VALUES} values`);
+    }
+  };
+
+  const haltOnTextLimit = (): void => {
+    halted = true;
+    if (textLimitReported === false) {
+      textLimitReported = true;
+      note(ROOT_PATH, `turn record strings and keys must total at most ${MAX_TEXT_UNITS} UTF-16 units`);
+    }
+  };
+
+  const countText = (units: number): void => {
+    textUnits += units;
+    if (textUnits > MAX_TEXT_UNITS) {
+      haltOnTextLimit();
+    }
   };
 
   const walkArray = (array: unknown[], depth: number, path: string): void => {
@@ -290,6 +322,9 @@ function preflight(root: unknown, issues: ValidationIssue[]): boolean {
     }
     let shapeOk = true;
     for (let index = 0; index < array.length; index += 1) {
+      if (halted) {
+        return;
+      }
       const descriptor = Object.getOwnPropertyDescriptor(array, index);
       if (descriptor === undefined) {
         note(indexPath(path, index), 'array element is missing (sparse array)');
@@ -307,6 +342,9 @@ function preflight(root: unknown, issues: ValidationIssue[]): boolean {
       }
     }
     for (const key of Object.getOwnPropertyNames(array)) {
+      if (halted) {
+        return;
+      }
       if (key === 'length' || isArrayIndexKey(key)) {
         continue;
       }
@@ -321,6 +359,9 @@ function preflight(root: unknown, issues: ValidationIssue[]): boolean {
       return;
     }
     for (let index = 0; index < array.length; index += 1) {
+      if (halted) {
+        return;
+      }
       walk(array[index], depth + 1, indexPath(path, index));
     }
   };
@@ -336,8 +377,23 @@ function preflight(root: unknown, issues: ValidationIssue[]): boolean {
       note(path, `object must have at most ${MAX_OBJECT_KEYS} keys`);
       return;
     }
+    for (const key of keys) {
+      if (halted) {
+        return;
+      }
+      countText(key.length);
+      if (halted) {
+        return;
+      }
+      if (key.length > MAX_STRING_LENGTH) {
+        note(joinPath(path, key), `object key must be at most ${MAX_STRING_LENGTH} UTF-16 units`);
+      }
+    }
     let shapeOk = true;
     for (const key of keys) {
+      if (halted) {
+        return;
+      }
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (descriptor === undefined) {
         continue;
@@ -360,23 +416,30 @@ function preflight(root: unknown, issues: ValidationIssue[]): boolean {
       return;
     }
     for (const key of keys) {
+      if (halted) {
+        return;
+      }
       walk(value[key], depth + 1, joinPath(path, key));
     }
   };
 
   const walk = (value: unknown, depth: number, path: string): void => {
+    if (halted) {
+      return;
+    }
     valueCount += 1;
     if (valueCount > MAX_TOTAL_VALUES) {
-      if (limitReported === false) {
-        limitReported = true;
-        note(ROOT_PATH, `turn record must contain at most ${MAX_TOTAL_VALUES} values`);
-      }
+      haltOnValueLimit();
       return;
     }
     if (value === null || typeof value === 'boolean') {
       return;
     }
     if (typeof value === 'string') {
+      countText(value.length);
+      if (halted) {
+        return;
+      }
       if (value.length > MAX_STRING_LENGTH) {
         note(path, `string must be at most ${MAX_STRING_LENGTH} UTF-16 units`);
       }
@@ -401,9 +464,6 @@ function preflight(root: unknown, issues: ValidationIssue[]): boolean {
       note(path, 'must not contain a reference cycle');
       return;
     }
-    if (visited.has(container)) {
-      return;
-    }
     visiting.add(container);
     if (Array.isArray(container)) {
       walkArray(container, depth, path);
@@ -411,7 +471,6 @@ function preflight(root: unknown, issues: ValidationIssue[]): boolean {
       walkRecord(container as DataRecord, depth, path);
     }
     visiting.delete(container);
-    visited.add(container);
   };
 
   walk(root, 0, ROOT_PATH);
