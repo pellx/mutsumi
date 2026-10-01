@@ -60,6 +60,7 @@ async function launch(){
     const endpoint=new URL(settings.OHMYGPT_BASE_URL||'https://api.ohmygpt.com/v1');
     if(!['https://api.ohmygpt.com/v1','https://api.ohmygpt.com/v1/'].includes(endpoint.href)||(settings.OHMYGPT_MODEL&&settings.OHMYGPT_MODEL!=='gemini-3.8-flash'))throw new Error('Only the selected OhMyGPT Gemini service is configured.');
     key=settings.OHMYGPT_API_KEY||'';
+    if(key.startsWith('sk-or-v1-'))throw new Error('OhMyGPT requires a key issued by OhMyGPT, not an OpenRouter key.');
     proxySetting=settings.OHMYGPT_PROXY_URL||'';
   }
   let proxy=null;
@@ -93,6 +94,6 @@ async function launch(){
   });
 }
 launch().catch(error=>{
-  const messages=new Set(['Cannot read local configuration.','Duplicate runtime setting.','Invalid runtime setting.','Invalid local port.','Invalid free-tier confirmation.','Only ohmygpt or google analysis is configured.','Only the selected official Gemini service is configured.','Only the selected OhMyGPT Gemini service is configured.','Proxy must be an explicit local HTTP address.','Build the server first with npm run build.','Cannot launch the local server.']);
+  const messages=new Set(['Cannot read local configuration.','Duplicate runtime setting.','Invalid runtime setting.','Invalid local port.','Invalid free-tier confirmation.','Only ohmygpt or google analysis is configured.','Only the selected official Gemini service is configured.','Only the selected OhMyGPT Gemini service is configured.','OhMyGPT requires a key issued by OhMyGPT, not an OpenRouter key.','Proxy must be an explicit local HTTP address.','Build the server first with npm run build.','Cannot launch the local server.']);
   console.error(messages.has(error?.message)?error.message:'Local server configuration failed.');process.exitCode=1;
 });
