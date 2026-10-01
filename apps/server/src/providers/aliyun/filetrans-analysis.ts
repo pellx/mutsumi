@@ -107,8 +107,23 @@ type Submission =
   | { readonly kind: 'poll'; readonly taskId: string }
   | { readonly kind: 'result'; readonly taskId: string; readonly resultUrl: string | null };
 
+/**
+ * Identity registry for failures this module itself constructed (including the
+ * mapper's returned failure). Membership is the only provenance signal: no
+ * foreign prototype, field, getter or shape is ever consulted.
+ */
+const TRUSTED_FAILURES = new WeakSet<object>();
+
 function failure(code: AnalysisFailure['code'], message: string): AnalysisFailure {
-  return { code, stage: 'transcription', message, retryable: false };
+  const record: AnalysisFailure = { code, stage: 'transcription', message, retryable: false };
+  TRUSTED_FAILURES.add(record);
+  return record;
+}
+
+/** Register a safe failure produced by the trusted mapper so it is thrown unchanged. */
+function trustedFailure(record: AnalysisFailure): AnalysisFailure {
+  TRUSTED_FAILURES.add(record);
+  return record;
 }
 
 function invalidAudio(): AnalysisFailure {
@@ -139,31 +154,13 @@ function invalidResult(): AnalysisFailure {
   return failure('invalid_result', INVALID_RESULT_MESSAGE);
 }
 
-const FAILURE_CODES: readonly string[] = [
-  'invalid_audio',
-  'publication_failed',
-  'model_mismatch',
-  'submission_failed',
-  'provider_failed',
-  'timed_out',
-  'cancelled',
-  'invalid_result',
-  'timing_unavailable',
-];
-
-/** Recognize a failure this adapter (or the mapper) already produced, so it is never wrapped. */
+/**
+ * Recognize only a failure this module constructed, by object identity, so an
+ * external plain object that merely resembles the public failure shape is never
+ * trusted for its code, message or cause.
+ */
 function isAnalysisFailure(value: unknown): value is AnalysisFailure {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  if (Object.getPrototypeOf(value) !== Object.prototype) return false;
-  const record = value as PlainRecord;
-  const code = record['code'];
-  return (
-    record['stage'] === 'transcription' &&
-    record['retryable'] === false &&
-    typeof record['message'] === 'string' &&
-    typeof code === 'string' &&
-    FAILURE_CODES.includes(code)
-  );
+  return typeof value === 'object' && value !== null && TRUSTED_FAILURES.has(value);
 }
 
 /**
@@ -683,7 +680,7 @@ export class AlibabaFiletransAnalysis implements AudioAnalysisPort {
         throw invalidResult();
       }
       const mapped = mapFiletransResult(parsed, audio);
-      if (!mapped.ok) throw mapped.error;
+      if (!mapped.ok) throw trustedFailure(mapped.error);
       throwIfAborted(deadline);
       return mapped.value;
     } catch (error: unknown) {
