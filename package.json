@@ -1,0 +1,19 @@
+{
+  "name": "mutsumi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mutsumi prototype: understands emotion in manually recorded voice clips and replies with expressive synthesized speech.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test tests/acceptance/annotation.test.mjs",
+    "typecheck": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext apps/server/src/domain/annotation.ts",
+    "check": "npm run typecheck && npm test",
+    "harness:check": "node tools/harness/run-qwen.mjs --check"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}
