@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mutsumi 情绪语音对话原型</title>
+<link rel="stylesheet" href="styles.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header>
+<h1>mutsumi</h1>
+<p id="mode-badge">模式状态加载中。</p>
+<p id="mode-banner">开发模式与 provider mock 提示由运行时填充；mock 结果不代表真实识别或语音质量。计划表达时间与实际音频时间分开记录。</p>
+<p id="provider-status">Provider 配置状态加载中。</p>
+</header>
+<main>
+<section aria-labelledby="record-heading">
+<h2 id="record-heading">录音与提交</h2>
+<p>每段音频上限 10 MiB、时长不超过 30 秒；手动开始与结束录音后提交完整整段，或选择音频文件上传。任一环节失败可重试。</p>
+<button id="record-button" type="button">开始录音</button>
+<button id="stop-button" type="button" disabled>结束录音并提交</button>
+<p>录制时长：<span id="recording-time">0</span> 秒</p>
+<label for="file-input">或选择音频文件：</label>
+<input id="file-input" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm">
+<button id="upload-button" type="button" disabled>上传所选文件</button>
+<button id="retry-button" type="button" hidden>重试</button>
+<p id="status" role="status" aria-live="polite">等待提交音频。</p>
+<p id="error" role="alert" hidden></p>
+<h3>处理阶段</h3>
+<ol>
+<li data-stage="intake">音频接入</li>
+<li data-stage="analysis">语音分析</li>
+<li data-stage="context">上下文整理</li>
+<li data-stage="dialogue">对话生成</li>
+<li data-stage="expression">表达规划</li>
+<li data-stage="synthesis">语音合成</li>
+<li data-stage="storage">记录存储</li>
+<li data-stage="complete">完成</li>
+</ol>
+</section>
+<section id="result-section" hidden aria-labelledby="result-heading">
+<h2 id="result-heading">分析结果</h2>
+<h3>原始录音</h3>
+<audio id="original-audio" controls preload="metadata"></audio>
+<p id="transcript">转写文本由运行时填充。</p>
+<p>字词与子词单元合计：<span id="unit-count">—</span></p>
+<p>全部字词与子词单元渲染在下方网格中；点击任意单元可试听原始音频对应区间。单元时间来自转写或对齐结果，部分来源可能是模型估算，而非测量值。</p>
+<div id="token-grid"></div>
+<h3>选中单元</h3>
+<p id="selection-detail">尚未选择单元。</p>
+<h3>情绪与声音观察</h3>
+<ul id="observations"></ul>
+<h3>能力状态</h3>
+<ul id="capabilities"></ul>
+</section>
+<section id="reply-section" hidden aria-labelledby="reply-heading">
+<h2 id="reply-heading">回复</h2>
+<p id="reply-text">回复文本由运行时填充。</p>
+<h3>表达计划</h3>
+<ul id="reply-plan"></ul>
+<h3>回复音频</h3>
+<audio id="assistant-audio" controls preload="metadata"></audio>
+<p id="output-timing">实际输出时间对齐状态由运行时显示；未取得时不伪造。</p>
+<p id="playback-status">播放状态加载中。</p>
+<button id="export-button" type="button" disabled>导出本轮记录</button>
+<button id="clear-button" type="button">清空并开始新一轮</button>
+</section>
+</main>
+<footer>
+<p>本地原型：失败会显示安全错误信息并恢复录音入口；不支持或缺失的能力显示为不可用，不显示密钥、价格或供应商内部信息。</p>
+</footer>
+</body>
+</html>
