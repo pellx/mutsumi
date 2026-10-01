@@ -32,7 +32,13 @@ import * as path from 'node:path';
 
 import { validatePersona, validatePreferences } from '../domain/conversation-validation.ts';
 import { validateTurnRecord } from '../domain/turn-record-validation.ts';
-import type { HistoryTurn, OwnerPreference, Persona, TurnRecord } from '../domain/conversation.ts';
+import type {
+  HistoryTurn,
+  OwnerPreference,
+  Persona,
+  RuntimeMode,
+  TurnRecord,
+} from '../domain/conversation.ts';
 import type { ConversationStorePort } from '../application/conversation-ports.ts';
 import { makeRoundError, toRoundFailure } from '../application/round-errors.ts';
 
@@ -70,6 +76,11 @@ function isUuidV4(value: unknown): value is string {
 
 function isOwnerSession(value: unknown): value is OwnerSessionId {
   return typeof value === 'string' && OWNER_SESSION_IDS.includes(value);
+}
+
+/** The single runtime mode each canonical owner session may record. */
+function expectedModeForSession(session: OwnerSessionId): RuntimeMode {
+  return session === 'owner-live' ? 'live' : 'development-mock';
 }
 
 function recordFileName(record: TurnRecord): string {
@@ -143,11 +154,13 @@ export class FileConversationStore implements ConversationStorePort {
     if (checked.ok === false) throw this.invalidInput();
     const record = structuredClone(checked.value);
     if (isOwnerSession(record.session_id) === false) throw this.invalidInput();
+    const sessionId = record.session_id;
+    if (record.mode !== expectedModeForSession(sessionId)) throw this.invalidInput();
     if (isUuidV4(record.turn_id) === false) throw this.invalidInput();
     if (record.created_at_ms > MAX_CREATED_AT_MS) throw this.invalidInput();
     return this.enqueue(() =>
       this.guard(async () => {
-        const directory = await this.ensureSessionDirectory(record.session_id);
+        const directory = await this.ensureSessionDirectory(sessionId);
         const suffix = `_${record.turn_id}.json`;
         const existing = await this.listRecordNames(directory);
         if (existing.some((name) => name.endsWith(suffix))) throw this.invalidInput();
@@ -303,6 +316,7 @@ export class FileConversationStore implements ConversationStorePort {
     if (checked.ok === false) throw this.failed();
     const record = checked.value;
     if (record.session_id !== sessionId) throw this.failed();
+    if (record.mode !== expectedModeForSession(sessionId)) throw this.failed();
     if (recordFileName(record) !== name) throw this.failed();
     return record;
   }
