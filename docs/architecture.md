@@ -92,3 +92,11 @@ Directories under `apps`, `tests`, and `tools` are a proposed layout, not claims
 6. M05: Jev evaluation, richer sound events, output alignment, or longer-term memory as separately agreed additions.
 
 Missing sound-event or emotion support must remain an explicit capability gap. A text-only demo is not acceptance of the emotional voice goal. Provider selection may move relevant M05 capabilities earlier.
+
+## Current CLI-first input module (D25)
+
+The owner's 2026-10-02 request supersedes the initial browser delivery order. Preserve existing NestJS/browser implementation; the next entry point accepts a local audio file without requiring HTTP or UI. Reuse native intake, original/analysis waveform storage and strict annotation validation.
+
+Three distinct ports separate untimed transcription/background descriptions, spoken-unit timing, and emotion candidates. Transcription cannot emit word timestamps. Timing owns segmentation and provenance, not emotions. The emotion port receives an immutable timed annotation and the same audio; returns observations referencing existing segment IDs, never replacement text or intervals. Candidate emotion granularity is phrase/segment, not an independently measured emotion for every tokenizer token. Background sound descriptions may overlap speech; missing times stay unavailable. No LLM-token split followed by evenly divided durations.
+
+Provider transport remains in adapters, with bounded request/read deadlines, byte limits, strict response schemas and safe errors. Private stage results and failures remain in ignored data. Orchestration retains completed stages on failure. No automatic model fallback. The initial transcription and emotion calls use the selected OhMyGPT Gemini 3.8 Flash; timing implementation awaits D25 clarification. CLI runs only input analysis and stops before unselected dialogue/TTS.
