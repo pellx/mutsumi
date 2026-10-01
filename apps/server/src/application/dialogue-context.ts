@@ -13,6 +13,9 @@ const MAX_HISTORY_TURNS = 6;
 const MAX_OBSERVATIONS = 32;
 const MAX_BOUND_STRING = 128;
 const MAX_SEGMENT_IDS = 64;
+const MAX_SEGMENT_ID_STRING = 128;
+const MAX_TIMING_PROVENANCE = 256;
+const MAX_OBSERVATION_SERIALIZED = 16384;
 const REQUIRED_KEYS: readonly string[] = ['asset', 'annotation', 'persona', 'preferences', 'history'];
 
 type Input = {
@@ -55,11 +58,22 @@ function assertPlainInput(input: unknown): asserts input is Input {
 }
 
 function isOverlong(obs: Observation): boolean {
-  return obs.observation_id.length > MAX_BOUND_STRING
+  if (obs.observation_id.length > MAX_BOUND_STRING
     || obs.label.length > MAX_BOUND_STRING
     || obs.source_provider.length > MAX_BOUND_STRING
-    || obs.source_model.length > MAX_BOUND_STRING
-    || (obs.segment_ids !== undefined && obs.segment_ids.length > MAX_SEGMENT_IDS);
+    || obs.source_model.length > MAX_BOUND_STRING) {
+    return true;
+  }
+  if (obs.segment_ids !== undefined) {
+    if (obs.segment_ids.length > MAX_SEGMENT_IDS) return true;
+    if (obs.segment_ids.some(id => id.length > MAX_SEGMENT_ID_STRING)) return true;
+  }
+  if (obs.timing.status === 'available') {
+    if (obs.timing.source.length > MAX_TIMING_PROVENANCE) return true;
+  } else if (obs.timing.reason.length > MAX_TIMING_PROVENANCE) {
+    return true;
+  }
+  return false;
 }
 
 function capabilityGaps(ann: AnnotatedAudio): string[] {
@@ -92,8 +106,15 @@ export function buildDialogueContext(input: Input): DialogueContext {
   const candidates = allObs.slice(0, MAX_OBSERVATIONS);
   if (allObs.length > MAX_OBSERVATIONS) truncated = true;
   const observations: Observation[] = [];
+  let serializedTotal = 0;
   for (const obs of candidates) {
     if (isOverlong(obs)) { truncated = true; continue; }
+    const serializedSize = JSON.stringify(obs).length;
+    if (serializedTotal + serializedSize > MAX_OBSERVATION_SERIALIZED) {
+      truncated = true;
+      continue;
+    }
+    serializedTotal += serializedSize;
     observations.push(structuredClone(obs));
   }
 
