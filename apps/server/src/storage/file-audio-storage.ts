@@ -44,7 +44,11 @@ export class FileAudioStorage implements AudioStoragePort {
   readonly rootDirectory: string;
 
   constructor(options: { rootDirectory: string }) {
-    this.rootDirectory = path.resolve(options.rootDirectory);
+    const root = options.rootDirectory;
+    if (typeof root !== 'string' || root.length === 0 || !path.isAbsolute(root)) {
+      throw makeRoundError('invalid_input', 'storage');
+    }
+    this.rootDirectory = path.resolve(root);
   }
 
   async save(bytes: Uint8Array, asset: AudioAsset): Promise<StoredAudio> {
@@ -95,35 +99,37 @@ export class FileAudioStorage implements AudioStoragePort {
     const { signal } = options;
     if (signal.aborted) throw this.cancelled();
     if (!isUuidV4(key)) throw this.invalid();
-    let read: StoredAssetRead | null;
-    try {
-      read = await this.readAssetSafely(key);
-    } catch {
-      if (signal.aborted) throw this.cancelled();
-      throw this.failed();
-    }
+    const read = await this.readAssetSafely(key);
     if (signal.aborted) throw this.cancelled();
     if (read === null) throw makeRoundError('not_found', 'storage');
-    return new Blob([read.bytes], { type: read.asset.media_type });
+    return new Blob([new Uint8Array(read.bytes)], { type: read.asset.media_type });
   }
 
   private async readAssetSafely(assetId: string): Promise<StoredAssetRead | null> {
-    const realRoot = await realpath(this.rootDirectory).catch(() => null);
+    const realRoot = await realpath(this.rootDirectory).catch((error: unknown) => {
+      if (codeOf(error) === 'ENOENT') return null;
+      throw this.failed();
+    });
     if (realRoot === null) return null;
+
     const directory = path.join(this.rootDirectory, assetId);
     const entry = await lstat(directory).catch((error: unknown) => {
       if (codeOf(error) === 'ENOENT') return null;
       throw this.failed();
     });
     if (entry === null) return null;
-    if (entry.isSymbolicLink() || !entry.isDirectory()) return null;
-    const realDirectory = await realpath(directory).catch(() => null);
+    if (entry.isSymbolicLink() || !entry.isDirectory()) throw this.failed();
+
+    const realDirectory = await realpath(directory).catch((error: unknown) => {
+      if (codeOf(error) === 'ENOENT') return null;
+      throw this.failed();
+    });
+    if (realDirectory === null) return null;
     if (
-      realDirectory === null
-      || path.basename(realDirectory) !== assetId
+      path.basename(realDirectory) !== assetId
       || path.dirname(realDirectory) !== realRoot
     ) {
-      return null;
+      throw this.failed();
     }
 
     const rawMetadata = await this.readCappedFile(
@@ -132,22 +138,25 @@ export class FileAudioStorage implements AudioStoragePort {
       MAX_METADATA_BYTES,
     );
     if (rawMetadata === null) return null;
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(rawMetadata.toString('utf8'));
     } catch {
-      return null;
+      throw this.failed();
     }
     const checked = validateAudioAsset(parsed);
-    if (!checked.ok) return null;
+    if (!checked.ok) throw this.failed();
     const value = checked.value;
-    if (value.asset_id !== assetId) return null;
+    if (value.asset_id !== assetId) throw this.failed();
+
     const bytes = await this.readCappedFile(
       path.join(directory, BYTES_FILE),
       realDirectory,
       MAX_AUDIO_BYTES,
     );
     if (bytes === null) return null;
+
     const asset: AudioAsset = {
       asset_id: value.asset_id,
       media_type: value.media_type,
@@ -168,23 +177,46 @@ export class FileAudioStorage implements AudioStoragePort {
       throw this.failed();
     });
     if (info === null) return null;
-    if (info.isSymbolicLink() || !info.isFile()) return null;
-    const resolved = await realpath(filePath).catch(() => null);
-    if (resolved === null || path.dirname(resolved) !== realParent) return null;
+    if (info.isSymbolicLink() || !info.isFile()) throw this.failed();
+
+    const resolved = await realpath(filePath).catch((error: unknown) => {
+      if (codeOf(error) === 'ENOENT') return null;
+      throw this.failed();
+    });
+    if (resolved === null) return null;
+    if (path.dirname(resolved) !== realParent) throw this.failed();
+
     const handle = await open(filePath, 'r').catch((error: unknown) => {
       if (codeOf(error) === 'ENOENT') return null;
       throw this.failed();
     });
     if (handle === null) return null;
+
     try {
       const stat = await handle.stat();
-      if (!stat.isFile() || stat.size <= 0 || stat.size > maxBytes) return null;
+      if (!stat.isFile() || stat.size <= 0 || stat.size > maxBytes) throw this.failed();
+
       const buffer = Buffer.alloc(stat.size);
-      const { bytesRead } = await handle.read(buffer, 0, stat.size, 0);
-      if (bytesRead !== stat.size) return null;
+      let totalRead = 0;
+      let iterations = 0;
+      const maxIterations = stat.size;
+      while (totalRead < stat.size) {
+        if (++iterations > maxIterations) throw this.failed();
+        const { bytesRead } = await handle.read(
+          buffer,
+          totalRead,
+          stat.size - totalRead,
+          totalRead,
+        );
+        if (bytesRead <= 0) throw this.failed();
+        totalRead += bytesRead;
+      }
+
+      const finalStat = await handle.stat();
+      if (finalStat.size !== stat.size) throw this.failed();
+
+      if (totalRead > maxBytes) throw this.failed();
       return buffer;
-    } catch {
-      throw this.failed();
     } finally {
       await handle.close().catch(() => undefined);
     }
@@ -207,11 +239,18 @@ export class FileAudioStorage implements AudioStoragePort {
   }
 
   private async cleanupPending(pending: string): Promise<void> {
-    if (!path.basename(pending).startsWith(PENDING_PREFIX)) return;
-    const realRoot = await realpath(this.rootDirectory).catch(() => null);
-    const realParent = await realpath(path.dirname(pending)).catch(() => null);
-    if (realRoot === null || realParent === null || realParent !== realRoot) return;
-    await rm(pending, { recursive: true, force: true }).catch(() => undefined);
+    try {
+      const info = await lstat(pending);
+      if (info.isSymbolicLink() || !info.isDirectory()) return;
+      const resolved = await realpath(pending);
+      const realRoot = await realpath(this.rootDirectory);
+      const dir = path.dirname(resolved);
+      const base = path.basename(resolved);
+      if (dir !== realRoot || !base.startsWith(PENDING_PREFIX)) return;
+      await rm(resolved, { recursive: true, force: true });
+    } catch {
+      // Cleanup failure must never mask the original safe failure.
+    }
   }
 
   private invalid(): Error {
