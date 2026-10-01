@@ -44,7 +44,8 @@ const SOUND_EVENT_UNAVAILABLE_REASON = 'sound-event detection is not assessed by
 
 const ROOT_KEYS = ['transcript', 'segments'];
 const SEGMENT_KEYS = ['text', 'units', 'emotion'];
-const UNIT_KEYS = ['text', 'granularity', 'start_ms', 'end_ms'];
+const UNIT_KEYS_REQUIRED = ['text', 'granularity'];
+const UNIT_KEYS_ALLOWED = ['text', 'granularity', 'start_ms', 'end_ms'];
 
 /** Output shape only; describes model estimates, not Gemini private vocabulary ids. */
 export const GEMINI_AUDIO_SCHEMA: Readonly<Record<string, unknown>> = {
@@ -139,8 +140,17 @@ function exactKeys(record: PlainRecord, allowed: readonly string[]): boolean {
   for (const key of keys) if (!allowed.includes(key)) return false;
   return true;
 }
+function allowedKeysWithRequired(record: PlainRecord, required: readonly string[], allowed: readonly string[]): boolean {
+  for (const key of Object.keys(record)) {
+    if (!allowed.includes(key)) return false;
+  }
+  for (const key of required) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) return false;
+  }
+  return true;
+}
 function readCell(value: unknown): TimeCell {
-  if (value === null) return { k: 'u' };
+  if (value === null || value === undefined) return { k: 'u' };
   if (typeof value === 'number' && Number.isSafeInteger(value)) return { k: 'v', ms: value };
   return { k: 'b' };
 }
@@ -148,10 +158,12 @@ function unitTiming(start: unknown, end: unknown, duration: number): UnitResult 
   const a = readCell(start);
   const b = readCell(end);
   if (a.k === 'b' || b.k === 'b') return { s: 'hard' };
+  if (a.k === 'v' && (a.ms < 0 || a.ms > duration)) return { s: 'hard' };
+  if (b.k === 'v' && (b.ms < 0 || b.ms > duration)) return { s: 'hard' };
   if (a.k !== 'v' || b.k !== 'v') return { s: 'soft' };
   const startMs = a.ms;
   const endMs = b.ms;
-  if (startMs < 0 || endMs < 0 || endMs > duration || startMs > endMs) return { s: 'hard' };
+  if (startMs > endMs) return { s: 'hard' };
   if (startMs === endMs) return { s: 'soft' };
   return { s: 'valid', start_ms: startMs, end_ms: endMs };
 }
@@ -178,6 +190,7 @@ export function mapGeminiAudioResult(json: string, asset: AudioAsset): Mapped {
 
   if (typeof json !== 'string') return invalidResult();
   if (json.length > MAX_JSON_CODE_UNITS) return invalidResult();
+  if (new TextEncoder().encode(json).byteLength > MAX_JSON_CODE_UNITS) return invalidResult();
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -233,17 +246,17 @@ export function mapGeminiAudioResult(json: string, asset: AudioAsset): Mapped {
     const rawEmotion = seg['emotion'];
     let emotion: string | null = null;
     if (rawEmotion !== null) {
-      if (typeof rawEmotion !== 'string' || rawEmotion.length > MAX_EMOTION_CODE_UNITS) {
+      if (typeof rawEmotion !== 'string' || rawEmotion.trim().length === 0 || rawEmotion.length > MAX_EMOTION_CODE_UNITS) {
         return invalidResult();
       }
-      if (rawEmotion.length > 0) emotion = rawEmotion;
+      emotion = rawEmotion;
     }
 
     const storedUnits: StoredUnit[] = [];
     let segmentLex = '';
     for (const rawUnit of unitArray) {
       const unit = readRecord(rawUnit);
-      if (unit === null || !exactKeys(unit, UNIT_KEYS)) return invalidResult();
+      if (unit === null || !allowedKeysWithRequired(unit, UNIT_KEYS_REQUIRED, UNIT_KEYS_ALLOWED)) return invalidResult();
       const unitText = unit['text'];
       if (typeof unitText !== 'string' || unitText.length === 0) return invalidResult();
       const granularity = unit['granularity'];
