@@ -74,7 +74,7 @@ Directories under `apps`, `tests`, and `tools` are a proposed layout, not claims
 
 ## First deliveries
 
-1. H00-Qwen: verify the Alibaba Qwen-backed Codex CLI harness with a restricted smoke task. DeepSeek has been retired by the owner.
+1. H00-Qwen: verify the Alibaba Qwen-backed Codex CLI harness with a restricted smoke task. Owner later authorized official DeepSeek fallback when Qwen fails; both launchers retain restricted execution and credential isolation.
 2. M01: implement provider-independent annotation contracts and validation after this design is discussed.
 3. M02: audio input + selected analysis provider; inspect actual annotation quality before proceeding.
 4. M03: selected dialogue model + persona + basic history.
