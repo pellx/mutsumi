@@ -1,0 +1,7 @@
+# Relay schema primitive-type regression
+
+Preferred implementer Qwen3.8-Flash via Codex CLI. Modify ONLY tests/acceptance/ohmygpt-audio-analysis.test.mjs with one physical write, then stop for supervisor commit. Do not modify source, documents, fixtures or launchers; no Git mutations, dotenv, secrets, data or live provider calls. Flow and architecture are preloaded.
+
+The supervisor independently verified the adapter's emitted request now has 12 explicitly typed schema nodes and preserves the shared schema. Persist this regression by extending the existing first request/schema test. Assert the wire schema's segments/items/units/items/granularity is exactly { enum: ['word','character'], type: 'string' }. Recursively visit actual schema nodes (root, property values and items) and assert each has an explicit string type. Property-name maps are not schema nodes. Keep the existing shared-schema immutability assertion. Do not copy the converter implementation into tests or relax existing assertions.
+
+Read only this test file. Build the changed text in memory, assert a unique first-test anchor and write once. Then run ONLY node --test tests/acceptance/ohmygpt-audio-analysis.test.mjs and report its actual outcome and actual implementer. No further edits; the supervisor commits before any next write. Official DeepSeek fallback remains authorized only if the preferred coding provider fails; do not launch another harness yourself.
