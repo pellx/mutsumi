@@ -11,8 +11,8 @@
 <header>
 <h1>mutsumi</h1>
 <p id="mode-badge">模式状态加载中。</p>
-<p id="mode-banner">开发模式与 provider mock 提示由运行时填充；mock 结果不代表真实识别或语音质量。计划表达时间与实际音频时间分开记录。</p>
-<p id="provider-status">Provider 配置状态加载中。</p>
+<p id="mode-banner">正在载入运行模式和可用能力。</p>
+<p id="provider-status">可用能力载入中。</p>
 </header>
 <main>
 <section aria-labelledby="record-heading">
@@ -22,7 +22,7 @@
 <button id="stop-button" type="button" disabled>结束录音并提交</button>
 <p>录制时长：<span id="recording-time">0</span> 秒</p>
 <label for="file-input">或选择音频文件：</label>
-<input id="file-input" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm">
+<input id="file-input" type="file" accept="audio/*,.wav,.mp3,.aac,.ogg,.flac,.webm">
 <button id="upload-button" type="button" disabled>上传所选文件</button>
 <button id="retry-button" type="button" hidden>重试</button>
 <p id="status" role="status" aria-live="polite">等待提交音频。</p>
@@ -63,12 +63,15 @@
 <audio id="assistant-audio" controls preload="metadata"></audio>
 <p id="output-timing">实际输出时间对齐状态由运行时显示；未取得时不伪造。</p>
 <p id="playback-status">播放状态加载中。</p>
+</section>
+<section id="actions-section" aria-labelledby="actions-heading">
+<h2 id="actions-heading">本轮操作</h2>
 <button id="export-button" type="button" disabled>导出本轮记录</button>
 <button id="clear-button" type="button">清空并开始新一轮</button>
 </section>
 </main>
 <footer>
-<p>本地原型：失败会显示安全错误信息并恢复录音入口；不支持或缺失的能力显示为不可用，不显示密钥、价格或供应商内部信息。</p>
+<p>每轮录音结束后开始处理。字词时间保留来源，情绪以片段候选线索展示。</p>
 </footer>
 </body>
 </html>
