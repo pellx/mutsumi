@@ -12,10 +12,10 @@ import 'reflect-metadata';
 import {
   Catch,
   HttpException,
-  NestFactory,
   type ArgumentsHost,
   type ExceptionFilter,
 } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { NextFunction, Request, Response } from 'express';
 import { dirname, isAbsolute, resolve } from 'node:path';
