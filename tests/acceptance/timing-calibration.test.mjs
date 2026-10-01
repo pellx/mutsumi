@@ -236,16 +236,24 @@ test('native timing and silence call the calibration port zero times', async () 
 });
 
 test('each eligible defect calls calibration exactly once with same asset and signal, submit stays 1', async () => {
-  const cals = [];
-  const cal = { calibrate: (a, o) => { cals.push({ a, o }); return Promise.resolve(baseCalibration()); } };
-  const fetch = makeFetch(qwenSucceededDownload(sigResultUrl, qwenHelloSoft()));
-  const adapter = new AlibabaFiletransAnalysis(analysisOptions(fetch, { timingCalibration: cal }));
-  const value = await adapter.analyze(ASSET, remote(FILETRANS_MODEL), { signal: new AbortController().signal });
-  assert.equal(cals.length, 1);
-  assert.equal(cals[0].a, ASSET, 'same asset object');
-  assert.ok(cals[0].o.signal instanceof AbortSignal, 'combined signal propagated');
-  assert.equal(fetch.count(isSubmit), 1, 'exactly one billed submit');
-  assert.equal(value.segments[0].units[0].timing.source, CAL_TS, 'fused');
+  const absentWords = qwenHelloSoft(); delete absentWords.transcripts[0].sentences[0].words;
+  const emptyWords = qwenHelloSoft(); emptyWords.transcripts[0].sentences[0].words = [];
+  const missingEndpoint = { transcripts: [{ channel_id: 0, text: HELLO, sentences: [{
+    begin_time: 0, end_time: 1000, text: HELLO, emotion: 'neutral',
+    words: [W(NI, 0, undefined), W(HAO, 100, 900)] }] }] };
+  const defects = { 'zero-length': qwenHelloSoft(), 'words absent': absentWords, 'words empty': emptyWords, 'endpoint missing': missingEndpoint };
+  for (const [name, payload] of Object.entries(defects)) {
+    const cals = [];
+    const cal = { calibrate: (a, o) => { cals.push({ a, o }); return Promise.resolve(baseCalibration()); } };
+    const fetch = makeFetch(qwenSucceededDownload(sigResultUrl, payload));
+    const adapter = new AlibabaFiletransAnalysis(analysisOptions(fetch, { timingCalibration: cal }));
+    const value = await adapter.analyze(ASSET, remote(FILETRANS_MODEL), { signal: new AbortController().signal });
+    assert.equal(cals.length, 1, name + ': exactly one calibration call');
+    assert.equal(cals[0].a, ASSET, name + ': same asset object');
+    assert.ok(cals[0].o.signal instanceof AbortSignal, name + ': combined signal propagated');
+    assert.equal(fetch.count(isSubmit), 1, name + ': exactly one billed submit');
+    assert.equal(value.segments[0].units[0].timing.source, CAL_TS, name + ': fused');
+  }
 });
 
 test('hard defects and unrelated HTTP errors never call calibration and never re-submit', async () => {
@@ -276,10 +284,15 @@ test('hard defects and unrelated HTTP errors never call calibration and never re
 });
 
 test('no configured port preserves strict safe errors (missing timing to timing_unavailable)', async () => {
-  const fetch = makeFetch(qwenSucceededDownload(sigResultUrl, qwenHelloSoft()));
-  const adapter = new AlibabaFiletransAnalysis(analysisOptions(fetch));
-  await expectReject(adapter.analyze(ASSET, remote(FILETRANS_MODEL), { signal: new AbortController().signal }), 'timing_unavailable', 'no port');
-  assert.equal(fetch.count(isSubmit), 1);
+  const fetchZero = makeFetch(qwenSucceededDownload(sigResultUrl, qwenHelloSoft()));
+  const adapterZero = new AlibabaFiletransAnalysis(analysisOptions(fetchZero));
+  await expectReject(adapterZero.analyze(ASSET, remote(FILETRANS_MODEL), { signal: new AbortController().signal }), 'invalid_result', 'no port: zero-boundary');
+  assert.equal(fetchZero.count(isSubmit), 1);
+  const absent = qwenHelloSoft(); delete absent.transcripts[0].sentences[0].words;
+  const fetchAbsent = makeFetch(qwenSucceededDownload(sigResultUrl, absent));
+  const adapterAbsent = new AlibabaFiletransAnalysis(analysisOptions(fetchAbsent));
+  await expectReject(adapterAbsent.analyze(ASSET, remote(FILETRANS_MODEL), { signal: new AbortController().signal }), 'timing_unavailable', 'no port: words-absent');
+  assert.equal(fetchAbsent.count(isSubmit), 1);
 });
 
 test('configuration rejects unknown model, malformed port and a port on Paraformer', () => {
@@ -306,12 +319,14 @@ test('calibration ignoring signal yields timed_out; caller abort yields cancelle
   const fetchT = makeFetch(qwenSucceededDownload('https://' + RESULT_HOST + '/r.json', qwenHelloSoft()));
   const adapterT = new AlibabaFiletransAnalysis(analysisOptions(fetchT, { timeoutMs: 40, timingCalibration: hang }));
   await expectReject(adapterT.analyze(ASSET, remote(FILETRANS_MODEL), { signal: new AbortController().signal }), 'timed_out', 'hung calibration');
-  assert.equal(calls, 1);
+  assert.equal(calls, 1, 'calibration called exactly once before timeout');
+  assert.equal(fetchT.count(isSubmit), 1, 'timeout case: exactly one submit');
   const controller = new AbortController();
   const abortCal = { calibrate: () => { controller.abort(); return new Promise(() => {}); } };
   const fetchC = makeFetch(qwenSucceededDownload('https://' + RESULT_HOST + '/r.json', qwenHelloSoft()));
   const adapterC = new AlibabaFiletransAnalysis(analysisOptions(fetchC, { timingCalibration: abortCal }));
   await expectReject(adapterC.analyze(ASSET, remote(FILETRANS_MODEL), { signal: controller.signal }), 'cancelled', 'caller abort');
+  assert.equal(fetchC.count(isSubmit), 1, 'abort case: exactly one submit');
 });
 
 test('a foreign thrown object cannot masquerade as cancelled or leak its getters', async () => {
@@ -321,11 +336,17 @@ test('a foreign thrown object cannot masquerade as cancelled or leak its getters
     get message() { reads.message += 1; return 'PRIVATE-SENTINEL'; },
     get cause() { reads.cause += 1; return { detail: 'PRIVATE-SENTINEL' }; },
   };
-  const fetch = makeFetch(async (u) => { if (isSubmit(u)) return Promise.reject(foreign); return json({}); });
-  const adapter = new AlibabaFiletransAnalysis(analysisOptions(fetch));
-  const err = await expectReject(adapter.analyze(ASSET, remote(FILETRANS_MODEL), { signal: new AbortController().signal }), 'submission_failed', 'foreign throw');
-  assert.equal(reads.code, 0); assert.equal(reads.message, 0); assert.equal(reads.cause, 0);
-  assert.ok(!err.message.includes('PRIVATE-SENTINEL'), 'no leak');
+  let calCalls = 0;
+  const cal = { calibrate: () => { calCalls += 1; return Promise.reject(foreign); } };
+  const fetch = makeFetch(qwenSucceededDownload(sigResultUrl, qwenHelloSoft()));
+  const adapter = new AlibabaFiletransAnalysis(analysisOptions(fetch, { timingCalibration: cal }));
+  const err = await expectReject(adapter.analyze(ASSET, remote(FILETRANS_MODEL), { signal: new AbortController().signal }), 'invalid_result', 'foreign throw via calibration');
+  assert.equal(reads.code, 0, 'code getter never read');
+  assert.equal(reads.message, 0, 'message getter never read');
+  assert.equal(reads.cause, 0, 'cause getter never read');
+  assert.ok(!err.message.includes('PRIVATE-SENTINEL'), 'no sentinel leak');
+  assert.equal(calCalls, 1, 'calibration called exactly once');
+  assert.equal(fetch.count(isSubmit), 1, 'exactly one submit');
 });
 
 const sub = (status) => ({ subtask_status: status, transcription_url: 'https://' + RESULT_HOST + '/r.json?Signature=SIG&Expires=1' });
