@@ -20,6 +20,8 @@ Status meanings: confirmed = agreed with the owner; proposed = awaiting discussi
 | D14 | Git workflow | confirmed | Immediately commit each tracked-file edit separately. Push to https://github.com/pellx/mutsumi after a substantial module passes supervisor acceptance. Never push .env, real audio or runtime logs. Remote was empty at inspection; origin is configured. |
 | D15 | Project name | confirmed | Owner finalized the project name as mutsumi, superseding the temporary wakaba name. Package and product documentation use mutsumi. Workspace is D:\\voicebot; designated remote is pellx/mutsumi. |
 | D16 | Flash versus Next | verified-docs / selected | Qwen's official model card describes Flash-Next as the open-weight version and Flash as the official hosted version based on it with additional production features. Select hosted Flash for the cloud coding workflow; this is a deployment-fit decision, not a claim of universal benchmark superiority. |
+| D17 | Initial text timing | confirmed | Owner requires text timing/duration in the first version (2026-10-01), choosing asynchronous transcription over a synchronous interface without timing. Store supported word/character start/end milliseconds; derive duration. Do not fabricate per-character boundaries from phrase durations. |
+| D18 | ASR implementation proposal | proposed | qwen3-asr-flash-filetrans, enable_words=true, sentence emotions, REST asynchronous tasks. Prototype upload via model-bound Alibaba temporary storage (48h), avoiding separate OSS credentials. Model/upload selection awaits owner reply; no ASR call has run. |
 
 ## Sources checked on 2026-10-01
 
@@ -35,6 +37,8 @@ Status meanings: confirmed = agreed with the owner; proposed = awaiting discussi
 
 - Project originally contains `voice-system-flow.md` only; no business code or Git repository was present at inspection.
 - Owner filled root .env; values are not stored in this register.
-- H00 is accepted: .runtime/harness-smoke/result.json exists, is valid JSON and describes manual interaction with automatic_turn_detection=false. No tracked-file changes were produced by the smoke run. Business modules are not yet accepted.
-- DeepSeek was stopped at the owner's request during final M01 container repair. Its single patch was committed as d94d366 and independently passed strict tsc. Persisted regression tests and business-module acceptance are still pending.
-- Qwen launcher syntax/config checks passed with CLI 0.159.2, qwen3.8-flash and xhigh. DASHSCOPE_API_KEY was blank at inspection; no authenticated Qwen run or GitHub push has occurred yet.
+- Historical DeepSeek H00 passed. DeepSeek was retired during M01 container repair; its final source patch d94d366 independently passed strict tsc. No further DeepSeek calls.
+- H00-Qwen authenticated tool/file smoke passed using qwen3.8-flash through Alibaba with CLI 0.159.2. Coding key is configured locally; its value is never recorded here. Smoke result is ignored .runtime/qwen-smoke/result.json.
+- Qwen wrote acceptance tests, repaired four fixture defects, and generated package.json. Source remains historical DeepSeek code reviewed by the supervisor. Supervisor independently ran npm run check: strict TypeScript and all 104 tests passed, 0 failures. M01 input annotation subset is accepted; this does not establish actual audio recognition quality or a running voice app.
+- Launcher defaults to xhigh; routine tasks can use per-invocation medium. Default time budget 5 minutes, configurable up to 10; timeout output is inspected for partial edits before any retry. Some Qwen attempts timed out without edits; final repair completed successfully.
+- Dependencies are pinned/locked. Runtime ASR/dialogue/TTS and browser/NestJS wiring are not implemented. First GitHub push follows final public-content review.
