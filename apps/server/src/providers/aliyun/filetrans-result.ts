@@ -519,6 +519,7 @@ function fuseWithCalibration(
   let previousEnd = -1;
   for (const segment of cal.segments) {
     let covered = '';
+    if (!segment.units || segment.units.length === 0) return invalidResult();
     for (const unit of segment.units) {
       if (unit.timing.status !== 'available') return invalidResult();
       if (unit.timing.source !== PARAFORMER_TIMING_SOURCE) return invalidResult();
