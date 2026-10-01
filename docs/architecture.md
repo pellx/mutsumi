@@ -38,6 +38,16 @@ Adapters implement interfaces, while orchestration consumes only domain types. A
 
 Temporary upload is an initial prototype choice, not indefinite storage. Original audio stays in ignored local data; remote references stay server-side. Replacement OSS implements the same publication port. No guarantee of immediate deletion is claimed for provider temporary storage.
 
+## Approved conditional timing repair (D20)
+
+Qwen remains the first input analysis call. Only structurally valid speech with missing or equal word boundaries may invoke one additional paraformer-v2 analysis with timestamp_alignment_enabled=true. Valid Qwen timing and silence skip calibration; malformed data, reversed/out-of-clip intervals and transport errors do not trigger it. The reproduced original-waveform pilot passed; application acceptance is still pending.
+
+An optional provider-independent AudioTimingCalibrationPort returns AnnotatedAudio for the same AudioAsset. It is injected into the Qwen analysis adapter. Application wiring composes publication and a Paraformer-configured analysis adapter to implement this port; remote references remain model-bound and server-internal. Publication supports only the two approved ASR models. The ASR transport supports their respective payload/result shapes while preserving its existing bounded request, cancellation and safe-error behavior. Paraformer cannot itself be configured for recursive calibration.
+
+Alibaba result mapping owns raw parsing and pure timing fusion. It separates structural validation from recognition of missing/equal bounds and never returns an incomplete annotation. Calibration must cover the same complete lexical sequence after NFC, Unicode punctuation and whitespace normalization only. Qwen sentence text and emotion observations keep their content, provider and original timing. Calibrated units retain their supported granularity and explicit Paraformer source. A Qwen sentence envelope may derive from its first/last calibrated unit; record that derivation in the timing source. Reject boundaries requiring a multi-character provider unit to be split, lexical mismatches, invalid timing, partial coverage, or wrong asset/provenance.
+
+At most one additional ASR submission is permitted per affected analysis, using a new Paraformer-bound upload of the original waveform. The initial analysis deadline/cancellation also covers calibration, publication and fusion. Failures do not cause re-submission or unbounded retry. Standalone Paraformer analysis reports emotion/prosody/sound-event capability as unavailable; it does not invent Qwen-style emotion output.
+
 ## Proposed project layout
 
 ```text
