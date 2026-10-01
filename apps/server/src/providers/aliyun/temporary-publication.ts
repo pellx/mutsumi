@@ -32,6 +32,9 @@ import type { AudioPublicationPort, RemoteAudioReference, StoredAudio } from '..
 import { validateAudioAsset } from '../../domain/annotation.ts';
 import { FILETRANS_MODEL, PARAFORMER_MODEL } from './filetrans-result.ts';
 
+/** Approved reference-conditioned Qwen audio transcription model. */
+const QWEN_AUDIO_FILETRANS_MODEL = 'qwen-audio-3.1-asr-flash-filetrans';
+
 /** Fixed approved DashScope upload-policy endpoint (Beijing). */
 const UPLOAD_POLICY_URL = 'https://dashscope.aliyuncs.com/api/v1/uploads';
 
@@ -395,7 +398,7 @@ export class AlibabaTemporaryPublication implements AudioPublicationPort {
     try {
       const check = this.#validateInput(audio);
       const model = options.model;
-      if (model !== FILETRANS_MODEL && model !== PARAFORMER_MODEL) throw modelMismatch();
+      if (model !== FILETRANS_MODEL && model !== PARAFORMER_MODEL && model !== QWEN_AUDIO_FILETRANS_MODEL) throw modelMismatch();
       throwIfAborted(deadline);
       const blob = await this.#loadAudio(check.key, deadline);
       const loaded = this.#verifyAudio(check, blob);
