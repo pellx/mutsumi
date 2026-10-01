@@ -1,0 +1,7 @@
+# M03 development mock import and stored-output repair
+
+Edit ONLY apps/server/src/providers/development/mock-conversation.ts in one successful write, no other file/Git. Read target only, public context supplied. It sits two levels below src: all six ../domain/... and ../application/... imports are wrong; change to ../../domain/... and ../../application/... (exact six replacements). No reformat/compaction.
+
+Supervisor source review also found the stored key is merely nonempty, so a different key can pass. In synthesis, require returned StoredAudio to be plain own-data exact {asset,storage_key}, with no getters/symbols/non-enumerable/extra fields before reading; validateAudioAsset for its asset. Require storage_key===expected generated UUID and every validated metadata field (ID,MIME,duration,rate,channels) to equal the locally generated silent-WAV metadata. Preserve a local independent expected asset that is not passed by reference to injected storage (pass a copy). Return a clone of validated metadata. Null/malformed/getter/mismatched metadata/key must become owned invalid_result at synthesis, never raw messages or evaluated getters. Keep existing fixed fixtures, silent bytes, unsupported controls and abort/storage handling.
+
+Preassert all anchors before one write, npm run typecheck then report. Prefer simple direct primitive comparisons, no JSON serialization or new generic library. No private media/secrets/harness reading. Supervisor checks all mock fixture boundaries and actual silent WAV samples/metadata before acceptance.
