@@ -13,8 +13,11 @@
  *   MIME type is a client assertion the adapter must verify against the actual
  *   decoded media; it is never a trusted input.
  * - The original clip and the normalized analysis clip are distinct private
- *   assets that share one clip-relative time origin. They are stored separately
- *   and neither is reconstructed from the other.
+ *   assets that share one clip-relative time origin and are retained separately
+ *   with distinct IDs. The normalized analysis audio is derived from the original
+ *   source by decoding/resampling only: no speed change and no intentional
+ *   trimming. It is a derived asset, never a reconstruction of, or a substitute
+ *   for, the retained original recording.
  * - Dialogue and speech-synthesis providers are independent of the coding
  *   provider: nothing here couples runtime voice quality to the model that
  *   authored this file.
@@ -23,9 +26,10 @@
  * - Turn records are persisted honestly as partial results: unavailable stages
  *   stay unavailable, and assistant audio is not assumed heard until playback
  *   completion is explicitly recorded.
- * - Storage keys and byte-bearing reads are server-internal capabilities. They
- *   are never copied into a public TurnRecord, a browser response, or a model
- *   prompt.
+ * - Storage keys are server-internal and are never copied into a public
+ *   TurnRecord, a browser response, or a model prompt. An authorized media
+ *   endpoint may serve an asset's bytes and safe public metadata by asset ID,
+ *   but never a storage key or a filesystem path.
  */
 
 import type { AudioAsset } from '../domain/annotation.js';
@@ -52,9 +56,10 @@ export type IntakeSubmission = {
 };
 
 /**
- * The two private assets produced by one intake: the untouched original and a
- * normalized analysis clip. Both share one clip-relative time origin; they are
- * distinct private assets and neither is derived from the other.
+ * The two private assets produced by one intake: the untouched original and the
+ * normalized analysis audio derived from it by decoding/resampling only (no
+ * speed change, no intentional trimming). Both are retained separately with
+ * distinct IDs and share one clip-relative time origin.
  */
 export type IntakeResult = {
   original: StoredAudio;
@@ -119,9 +124,11 @@ export type ConversationStorePort = {
 };
 
 /**
- * A stored asset paired with its raw bytes. Both the bytes and the resolved
- * asset are server-internal capabilities that must never be copied into a
- * public TurnRecord, returned to the browser, or placed in a model prompt.
+ * A stored asset paired with its raw bytes. This internal byte-bearing bundle is
+ * never serialized wholesale into a public TurnRecord, a model prompt, or any
+ * other arbitrary response. An authorized media endpoint may serve the asset's
+ * bytes and safe public metadata by asset ID, but never the storage key or a
+ * filesystem path.
  */
 export type StoredAssetRead = {
   asset: AudioAsset;
