@@ -1,6 +1,6 @@
 # Mutsumi initial architecture
 
-Confirmed stack: TypeScript, local Node backend using NestJS, browser UI. Module/provider details below are proposals until their task is released. Input annotation contracts are implemented independently of NestJS; cloud speech/dialogue/TTS providers remain unselected.
+Confirmed stack: TypeScript, local Node backend using NestJS, browser UI. Input annotation contracts are implemented and accepted independently of NestJS. Initial input analysis selects Alibaba qwen3-asr-flash-filetrans asynchronous REST with text-unit timing and sentence emotion; publication uses Alibaba temporary uploads, later replaced by owner-managed OSS. Dialogue and TTS remain unselected. Selected ASR is not yet a verified live integration.
 
 ## Product behavior
 
@@ -27,6 +27,16 @@ The browser records audio and displays/plays results. A local backend owns crede
 | Round orchestration | One valid submission | Result or structured error | Sequence ports, enforce single in-flight round, bounded retries/timeouts. |
 
 Adapters implement interfaces, while orchestration consumes only domain types. Avoid one universal AI service that mixes ASR, dialogue, TTS, storage and secrets.
+
+## M02 implementation sequence
+
+1. Declare separate server-internal publication and audio-analysis ports. Local storage keys and remote signed references never enter strict public annotation objects or dialogue context.
+2. Map bounded vendor JSON into the accepted annotation schema using synthetic cases. Keep provider word/character granularity; punctuation has no fabricated duration. Preserve sentence emotions without invented confidence. Require timing for spoken text; silence is distinct from unsupported timing.
+3. Implement temporary publication: request a model-bound upload policy, upload the validated local audio, return a short-lived oss-resource reference. Implement ASR transport separately: submit exactly once, poll under a shared cancellation/deadline, download and validate the result. Do not forward API authorization to upload/result hosts.
+4. Wire local intake/application through NestJS and validate complete clips before billed work. Provider asynchronous tasks do not introduce realtime voice turn control.
+5. Independently verify both failure behavior using synthetic transports and a real short sample. Actual returned timing granularity and emotion quality must be reviewed before declaring M02 accepted.
+
+Temporary upload is an initial prototype choice, not indefinite storage. Original audio stays in ignored local data; remote references stay server-side. Replacement OSS implements the same publication port. No guarantee of immediate deletion is claimed for provider temporary storage.
 
 ## Proposed project layout
 
