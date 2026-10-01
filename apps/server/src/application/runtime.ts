@@ -57,9 +57,9 @@ export type CreateRuntimeOptions = {
 };
 
 function resolveDataDir(projectRoot: string, dataDirectory?: string): string {
-  const base = join(projectRoot, 'data');
+  const base = resolve(projectRoot, 'data');
   if (dataDirectory === undefined || dataDirectory === '') return base;
-  const resolved = isAbsolute(dataDirectory) ? dataDirectory : resolve(projectRoot, dataDirectory);
+  const resolved = resolve(projectRoot, dataDirectory);
   if (resolved !== base && !resolved.startsWith(base + sep)) {
     throw new Error('dataDirectory must resolve within projectRoot/data');
   }
@@ -68,6 +68,9 @@ function resolveDataDir(projectRoot: string, dataDirectory?: string): string {
 
 export function createRuntime(options: CreateRuntimeOptions): Runtime {
   const { projectRoot, mode } = options;
+  if (!isAbsolute(projectRoot)) {
+    throw new Error('projectRoot must be an absolute path');
+  }
   if (mode !== 'live' && mode !== 'development-mock') {
     throw new Error('mode must be "live" or "development-mock"');
   }
