@@ -40,13 +40,13 @@ const configs = {
   'windows.sandbox': 'unelevated',
   'features.apps': false,
   'features.plugins': false,
-  'shell_environment_policy.exclude': ['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENROUTER_API_KEY', 'OHMYGPT_API_KEY'],
+  'shell_environment_policy.exclude': ['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENROUTER_API_KEY', 'OHMYGPT_API_KEY', 'TYPESAFE_API_KEY', 'TYPESAFE_API_KEY_2'],
 };
 const args = ['exec', '--ignore-user-config', '--ephemeral', '--json', '--color', 'never', '-C', root, '-s', 'workspace-write', '-m', model];
 for (const [name, value] of Object.entries(configs)) args.push('-c', `${name}=${JSON.stringify(value)}`);
 args.push('-');
 const env = { ...process.env };
-for (const name of ['DASHSCOPE_API_KEY','DEEPSEEK_API_KEY','OPENAI_API_KEY','GEMINI_API_KEY','GOOGLE_API_KEY','OPENROUTER_API_KEY','OHMYGPT_API_KEY']) delete env[name];
+for (const name of ['DASHSCOPE_API_KEY','DEEPSEEK_API_KEY','OPENAI_API_KEY','GEMINI_API_KEY','GOOGLE_API_KEY','OPENROUTER_API_KEY','OHMYGPT_API_KEY', 'TYPESAFE_API_KEY', 'TYPESAFE_API_KEY_2']) delete env[name];
 const outputDir = path.join(root, '.runtime/harness-runs', new Date().toISOString().replaceAll(':', '-'));
 await mkdir(outputDir, { recursive: true });
 const child = spawn(executable, args, { cwd: root, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
