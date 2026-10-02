@@ -11,6 +11,7 @@ import os
 import stat
 import sys
 import time
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -37,11 +38,9 @@ def emit_error(code: str) -> int:
 
 
 def has_reparse_or_symlink(path: Path) -> bool:
-    """Check each existing path component without resolving it first."""
     absolute = Path(os.path.abspath(path))
-    parts = absolute.parts
-    current = Path(parts[0])
-    for part in parts[1:]:
+    current = Path(absolute.parts[0])
+    for part in absolute.parts[1:]:
         current = current / part
         try:
             info = current.lstat()
@@ -117,17 +116,22 @@ def check_model(model: Path) -> None:
     if not model.is_dir():
         raise WorkerError("model_missing")
     required = (
-        "config.json", "processor_config.json", "tokenizer_config.json", "tokenizer.json",
-        "generation_config.json", "speech_tokenizer/config.json",
+        "config.json", "generation_config.json", "preprocessor_config.json",
+        "tokenizer_config.json", "merges.txt", "vocab.json", "model.safetensors",
+        "speech_tokenizer/config.json", "speech_tokenizer/configuration.json",
         "speech_tokenizer/preprocessor_config.json", "speech_tokenizer/model.safetensors",
-        "model.safetensors",
     )
     for name in required:
-        if not (model / name).is_file():
+        file_path = model / name
+        if has_reparse_or_symlink(file_path):
+            raise WorkerError("path_invalid")
+        if not file_path.is_file():
             raise WorkerError("model_missing")
     try:
         config = json.loads((model / "config.json").read_text(encoding="utf-8"))
-        if (config.get("model_type"), config.get("tts_model_type"), config.get("tts_model_size")) != ("qwen3_tts", "custom_voice", "1.7b"):
+        if type(config) is not dict:
+            raise WorkerError("model_invalid")
+        if (config.get("model_type"), config.get("tts_model_type"), config.get("tts_model_size")) != ("qwen3_tts", "custom_voice", "1b7"):
             raise WorkerError("model_invalid")
     except WorkerError:
         raise
@@ -145,13 +149,11 @@ def check_model(model: Path) -> None:
             raise WorkerError("model_hash_mismatch")
 
 
-def finite_number(value: Any) -> float:
+def finite_number(value: Any) -> tuple[float, float, Any]:
     try:
         import numpy as np
         arr = np.asarray(value)
-        if arr.size == 0 or arr.ndim != 1:
-            raise WorkerError("audio_invalid")
-        if not np.issubdtype(arr.dtype, np.number) or not bool(np.isfinite(arr).all()):
+        if arr.size == 0 or arr.ndim != 1 or arr.dtype.kind != "f" or not bool(np.isfinite(arr).all()):
             raise WorkerError("audio_invalid")
         peak = float(np.max(np.abs(arr)))
         rms = float(np.sqrt(np.mean(np.square(arr, dtype=np.float64))))
@@ -164,8 +166,24 @@ def finite_number(value: Any) -> float:
         raise WorkerError("audio_invalid") from None
 
 
+class JsonArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        print('{"error":"argument_invalid"}')
+        raise SystemExit(1)
+
+
+def check_runtime_versions() -> None:
+    expected = {"qwen-tts": "0.1.1", "transformers": "4.57.3", "torch": "2.10.0+cpu"}
+    try:
+        for package, version in expected.items():
+            if metadata.version(package) != version:
+                raise WorkerError("runtime_version_mismatch")
+    except metadata.PackageNotFoundError:
+        raise WorkerError("runtime_version_mismatch") from None
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Offline CPU-only Qwen3-TTS preset voice synthesis")
+    parser = JsonArgumentParser(description="Offline CPU-only Qwen3-TTS preset voice synthesis")
     parser.add_argument("--request-file", required=True, help="UTF-8 JSON request file")
     parser.add_argument("--output-dir", required=True, help="New or empty output directory")
     parser.add_argument("--model-dir", default=str(DEFAULT_MODEL), help="Local pinned model directory")
@@ -176,7 +194,9 @@ def main(argv: list[str] | None = None) -> int:
     owned: list[Path] = []
     try:
         request_path = safe_path(args.request_file, must_exist=True)
-        model_path = safe_path(args.model_dir, must_exist=True)
+        model_path = safe_path(args.model_dir, must_exist=False)
+        if not model_path.exists():
+            raise WorkerError("model_missing")
         output_path = safe_path(args.output_dir, must_exist=False)
         if request_path.is_dir() or not request_path.is_file():
             raise WorkerError("request_unreadable")
@@ -189,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
         request = read_request(request_path)
         check_model(model_path)
+        check_runtime_versions()
         output_path.mkdir(parents=True, exist_ok=True)
         if shutil_disk_free(output_path) < MIN_FREE_BYTES:
             raise WorkerError("disk_space_low")
@@ -217,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         if type(result) not in (tuple, list) or len(result) != 2:
             raise WorkerError("audio_invalid")
         wavs, rate = result
-        if int(rate) != 24000 or len(wavs) != 1:
+        if type(rate) is not int or rate != 24000 or type(wavs) not in (tuple, list) or len(wavs) != 1:
             raise WorkerError("audio_invalid")
         peak, rms, samples = finite_number(wavs[0])
         frames = int(samples.shape[0])
@@ -227,11 +248,14 @@ def main(argv: list[str] | None = None) -> int:
         write_start = time.monotonic()
         wav_path = output_path / "output.wav"
         try:
-            with wav_path.open("xb"):
-                owned.append(wav_path)
-            with contextlib.redirect_stdout(sys.stderr):
-                import soundfile as sf
-                sf.write(str(wav_path), samples, 24000, subtype="FLOAT", format="WAV")
+            wav_stream = wav_path.open("xb")
+            owned.append(wav_path)
+            with wav_stream:
+                with contextlib.redirect_stdout(sys.stderr):
+                    import soundfile as sf
+                    sf.write(wav_stream, samples, 24000, subtype="FLOAT", format="WAV")
+                wav_stream.flush()
+                os.fsync(wav_stream.fileno())
         except FileExistsError:
             raise WorkerError("output_exists") from None
         except WorkerError:
