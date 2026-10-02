@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import json
 import math
+import os
 import re
 import sys
 import time
@@ -57,6 +58,8 @@ def read_transcript(path: Path) -> str:
         transcript = content
     if not transcript.strip():
         raise WorkerError("input_invalid", "Transcript must not be blank.")
+    if not lexical_key(transcript):
+        raise WorkerError("input_invalid", "Transcript must contain spoken lexical content.")
     return transcript
 
 
@@ -64,9 +67,15 @@ def load_audio(path: Path):
     if not path.is_file():
         raise WorkerError("input_invalid", "Audio path must name a readable local WAV file.")
     try:
-        import numpy as np
-        import soundfile as sf
-        samples, sample_rate = sf.read(str(path), dtype="float32", always_2d=True)
+        with contextlib.redirect_stdout(sys.stderr):
+            import numpy as np
+            import soundfile as sf
+            info = sf.info(str(path))
+            if info.format not in ("WAV", "WAVEX", "RF64"):
+                raise WorkerError("input_invalid", "Audio file content must be WAV, WAVEX, or RF64 format.")
+            samples, sample_rate = sf.read(str(path), dtype="float32", always_2d=True)
+    except WorkerError:
+        raise
     except Exception as exc:
         raise WorkerError("input_invalid", "Audio must be a readable WAV file.") from exc
     if samples.ndim != 2 or samples.shape[1] != 1:
@@ -89,11 +98,44 @@ def lexical_key(value: str) -> str:
     return "".join(ch for ch in normalized if not ch.isspace() and not unicodedata.category(ch).startswith("P"))
 
 
+def raw_json_value(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        if math.isnan(value):
+            tag = "NaN"
+        elif value > 0:
+            tag = "Infinity"
+        else:
+            tag = "-Infinity"
+        return {"non_finite": tag}
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [raw_json_value(part) for part in value]
+    if isinstance(value, dict):
+        return {str(key): raw_json_value(part) for key, part in value.items()}
+    return str(value)
+
+
+def raw_units(items: Any) -> list[dict[str, Any]]:
+    if not isinstance(items, (list, tuple)):
+        return []
+    result = []
+    for item in items:
+        result.append({
+            "text": raw_json_value(getattr(item, "text", None)),
+            "start_time": raw_json_value(getattr(item, "start_time", None)),
+            "end_time": raw_json_value(getattr(item, "end_time", None)),
+        })
+    return result
+
+
 def map_alignment(items: Any, transcript: str, duration: float) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    mapped: list[dict[str, Any]] = []
-    invalid: list[dict[str, Any]] = []
     if not isinstance(items, (list, tuple)):
         raise WorkerError("invalid_alignment", "Aligner returned an invalid unit list.", [])
+    diagnostics = raw_units(items)
+    mapped: list[dict[str, Any]] = []
+    invalid = False
+    texts: list[str] = []
     for item in items:
         try:
             unit_text = item.text
@@ -103,36 +145,63 @@ def map_alignment(items: Any, transcript: str, duration: float) -> tuple[list[di
             unit_text = getattr(item, "text", None)
             start = getattr(item, "start_time", None)
             end = getattr(item, "end_time", None)
-        try:
-            start_num = float(start)
-            end_num = float(end)
-            valid = (isinstance(unit_text, str) and bool(unit_text) and
-                     math.isfinite(start_num) and math.isfinite(end_num) and
-                     start_num >= 0 and end_num > start_num and end_num <= duration)
-        except (TypeError, ValueError, OverflowError):
-            start_num = end_num = math.nan
-            valid = False
+        numeric = lambda value: isinstance(value, (int, float)) and not isinstance(value, bool)
+        valid = isinstance(unit_text, str) and bool(unit_text.strip()) and numeric(start) and numeric(end)
+        if valid:
+            start_num, end_num = float(start), float(end)
+            start_ms, end_ms = round(start_num * 1000), round(end_num * 1000)
+            valid = (math.isfinite(start_num) and math.isfinite(end_num) and start_num >= 0 and
+                     end_num > start_num and end_num <= duration and start_ms >= 0 and
+                     end_ms > start_ms and end_ms <= round(duration * 1000))
+        else:
+            start_num = end_num = 0.0
+            start_ms = end_ms = 0
         if not valid:
-            invalid.append({"text": unit_text, "start_time": start, "end_time": end})
+            invalid = True
         if isinstance(unit_text, str):
+            texts.append(unit_text)
             granularity = "character" if len(unit_text) == 1 else "word"
         else:
             granularity = "word"
-        mapped.append({"text": unit_text, "start_ms": round(start_num * 1000) if math.isfinite(start_num) else None,
-                       "end_ms": round(end_num * 1000) if math.isfinite(end_num) else None,
-                       "granularity": granularity})
+        mapped.append({"text": unit_text, "start_ms": start_ms if valid else None,
+                       "end_ms": end_ms if valid else None, "granularity": granularity})
+    if not items or not lexical_key(transcript) or not lexical_key("".join(texts)):
+        invalid = True
+    if not invalid and lexical_key("".join(texts)) != lexical_key(transcript):
+        invalid = True
     if invalid:
-        return mapped, invalid
-    joined = "".join(item["text"] for item in items if isinstance(getattr(item, "text", None), str))
-    if lexical_key(joined) != lexical_key(transcript):
-        raise WorkerError("invalid_alignment", "Aligned units do not cover the supplied transcript.", [])
+        return mapped, diagnostics
     return mapped, []
+
+
+def has_1455(exc: BaseException) -> bool:
+    pending = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if getattr(current, "winerror", None) == 1455:
+            return True
+        if any("1455" in str(arg) for arg in getattr(current, "args", ())):
+            return True
+        if "1455" in str(getattr(current, "__dict__", {})):
+            return True
+        for nested in (getattr(current, "__cause__", None), getattr(current, "__context__", None)):
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+    return False
+
+
+def memory_error(code: str) -> WorkerError:
+    return WorkerError(code, "Local memory or pagefile is insufficient to load or run the model.")
 
 
 def safe_error(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, WorkerError):
         return exc.code, exc.message
-    if getattr(exc, "winerror", None) == 1455 or "1455" in str(getattr(exc, "args", "")):
+    if has_1455(exc):
         return "model_load_failed", "Local memory or pagefile is insufficient to load the model."
     return "model_load_failed", "The local aligner could not be loaded."
 
@@ -146,6 +215,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if not model_dir.is_dir() or any(not (model_dir / name).is_file() for name in MODEL_FILES):
         raise WorkerError("model_missing", "The configured local model directory is incomplete.")
 
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
     try:
         with contextlib.redirect_stdout(sys.stderr):
             import torch
@@ -154,6 +225,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             device_name = "cpu"
             actual_backend = "cpu"
             adapter_name = None
+            directml_device = None
             if args.device == "directml":
                 try:
                     import torch_directml
@@ -171,6 +243,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 except WorkerError:
                     raise
                 except Exception as exc:
+                    if has_1455(exc):
+                        raise memory_error("backend_unavailable") from exc
                     raise WorkerError("backend_unavailable", "The required DirectML device is unavailable.") from exc
             load_start = time.perf_counter()
             try:
@@ -185,6 +259,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             except WorkerError:
                 raise
             except Exception as exc:
+                if has_1455(exc):
+                    raise memory_error("model_load_failed") from exc
                 raise WorkerError("model_load_failed", "The local aligner could not be loaded.") from exc
             load_ms = round((time.perf_counter() - load_start) * 1000)
             inference_start = time.perf_counter()
@@ -192,12 +268,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 result = aligner.align(audio=(samples, sample_rate), text=transcript, language=args.language)
                 items = result[0].items
             except Exception as exc:
+                if has_1455(exc):
+                    raise memory_error("inference_failed") from exc
                 raise WorkerError("inference_failed", "The local alignment request failed.") from exc
             inference_ms = round((time.perf_counter() - inference_start) * 1000)
-            units, invalid = map_alignment(items, transcript, duration)
+            try:
+                units, invalid = map_alignment(items, transcript, duration)
+            except WorkerError:
+                raise
+            except Exception as exc:
+                raise WorkerError("invalid_alignment", "Aligner returned invalid time spans.", raw_units(items)) from exc
             if invalid:
-                raise WorkerError("invalid_alignment", "Aligner returned invalid time spans.", invalid)
-        output: dict[str, Any] = {
+                raise WorkerError("invalid_alignment", "Aligner returned invalid time spans or lexical coverage.", invalid)
+        return {
             "status": "ok", "schema_version": "0.1", "transcript": transcript,
             "language": args.language, "duration_ms": round(duration * 1000), "units": units,
             "source": SOURCE,
@@ -206,10 +289,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "torch_version": str(torch.__version__), "dtype": args.dtype,
             "load_ms": load_ms, "inference_ms": inference_ms,
         }
-        return output
     except WorkerError:
         raise
     except Exception as exc:
+        if has_1455(exc):
+            raise memory_error("model_load_failed") from exc
         code, message = safe_error(exc)
         raise WorkerError(code, message) from exc
 
@@ -227,6 +311,9 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    original_stdout = sys.stdout
+    if hasattr(original_stdout, "reconfigure"):
+        original_stdout.reconfigure(encoding="utf-8")
     args = parser().parse_args()
     try:
         output = run(args)
@@ -234,14 +321,14 @@ def main() -> int:
         output = {"status": exc.code, "error": {"code": exc.code, "message": exc.message}}
         if exc.diagnostics is not None:
             output["diagnostics"] = {"invalid_units": exc.diagnostics}
-        print(json.dumps(output, ensure_ascii=False, separators=(",", ":")))
+        print(json.dumps(output, ensure_ascii=False, separators=(",", ":"), allow_nan=False), file=original_stdout)
         return 1
     except Exception as exc:
         code, message = safe_error(exc)
-        print(json.dumps({"status": code, "error": {"code": code, "message": message}}, ensure_ascii=False,
-                         separators=(",", ":")))
+        output = {"status": code, "error": {"code": code, "message": message}}
+        print(json.dumps(output, ensure_ascii=False, separators=(",", ":"), allow_nan=False), file=original_stdout)
         return 1
-    print(json.dumps(output, ensure_ascii=False, separators=(",", ":")))
+    print(json.dumps(output, ensure_ascii=False, separators=(",", ":"), allow_nan=False), file=original_stdout)
     return 0
 
 
