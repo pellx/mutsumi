@@ -138,3 +138,11 @@ Updated docs/input-vocals-onsets-design.md and D36; current target diagram appen
 质量仍待真人核对：衣柜整体模型声称器乐，与用户“含人声BGM”标签不一致；fumo整体室内线索与人声阶段户外线索冲突。人声分离不保证前景说话者与背景歌手隔离。转写未获得human-reference，不自动定稿，不将场景/性别/地点猜测写入记忆，不造时间戳。
 
 私人试听页 http://127.0.0.1:8768/（若仍运行），QA服务 .runtime/qa/owner-two-listening-server.mjs；六条音轨Edge元数据检查通过且截图已检查。静态报告 data/acceptance/owner-two-listening.html。换设备复制所需ignored私有材料后重开QA服务，不能期待本机进程迁移。Luna三次编码报告在.runtime/harness-runs/whole-audio-worker/harness-runs，经哈希备份校验后本任务工作树已移除；Jev未验收工作树仍保留。所有提交仅本地，无push。下一步实现双来源InputContextBundle/上下文编排，继续通过ChatGPT认证gpt-6-luna CLI逐文件实现；听审确认后推进句子/字起点和声学情绪。TTS仍按D35延期。
+
+### 句子首尾本地候选（2026-10-03，D38）
+
+用户已真人试听接受fumo和衣柜人声分离，当前转做分句；不等于原话/场景/时间/情绪验收。Luna实现并修复 tools/local-aligner/sentence_result.py，监督35项独立结构检查通过，逐文件提交合入main，详见[分句验收](reviews/M02-sentence-bounds.md)。两个原生本地对齐请求仍invalid_alignment，全部诊断保留；新句子mapper只独立提取有效句子首尾，不冒充旧完整逐字区间成功。
+
+fumo按转写句末标点得到7个模型边界候选，真实采样裁剪7段可试听；句界听审仍待用户。衣柜无句末标点且末字零时长，仅保留一个single_span_unverified、bounds unavailable，不造边界。下一步需文字不变的语义分句提案/声学句尾定位，以及每句裁剪后本地逐字起点推理；目前mapper不加载模型，监督QA调用既有align.py，不是生产CLI已接线。私人输出在owner-fumo/owner-wardrobe的sentence-pilot-001。新试听 http://127.0.0.1:8769/（进程仍运行时），旧原音分离对照8768；9条音轨Edge元数据检查和页面截图通过不等于听审。
+
+用户新提供中文人声素材_7段.zip已安全解包到ignored data/acceptance/owner-seven-001，7段约10s48k双声道PCM16，原始哈希/帧数在inputs.json，source-notes.txt只作未核验来源说明。自动审批拒绝新14次云端计划，尚未执行；用户随后转本地分句，七段未做分离/云端识别。不要自行绕过拒绝。全部密钥/录音/QA原始响应保持忽略，不推送。Luna无写入启动/编码问题、原稿恢复和后续修复完整证据另存主仓库.runtime/harness-runs/sentence-worker及.runtime/qa。
