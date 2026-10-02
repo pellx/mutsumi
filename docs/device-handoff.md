@@ -2,13 +2,23 @@
 
 ## 接续位置
 
-所有者要求整理工作区并推送至 https://github.com/pellx/mutsumi ，以便换设备继续。此前“等待体验再推送”的限制由这次明确同步请求解除。此文件记录交接时状态，不表示本地对齐部署已经成功。
+原设备交接时，所有者要求同步至 https://github.com/pellx/mutsumi 以换设备。新设备接续后，所有者确认 D29：当前只写入和提交本地仓库，迁移设备时再同步，不因模块通过就自动推送。本文件区分原设备历史阻塞与新设备实际验收。
 
 最新已批准方案是 D28：Gemini 保留转写/背景描述，Qwen3-ForcedAligner 在本地接收同一段音频和指定文字，只负责原生字词时间；后续 Gemini 情绪阶段独立。背景描述不能充当强制对齐文字。不得均分时间、把不同 ASR 文字按序贴到参考文字上，或静默重试/改回 Paraformer。
 
-下一项已释放任务：[M02-local-forced-aligner-worker.md](tasks/M02-local-forced-aligner-worker.md)。目标 `tools/local-aligner/align.py` 尚未创建：Luna 运行在读取目标不存在后、写文件前被监督者停止。新设备应按任务继续，不把任务文档误认为已完成模块。后续需要独立验收，然后再设计 Node TimingPort 子进程适配器和完整输入 CLI；情绪适配器待实现。
+[M02-local-forced-aligner-worker.md](tasks/M02-local-forced-aligner-worker.md) 已由 ChatGPT 认证的 Luna CLI 实现：[tools/local-aligner/align.py](../tools/local-aligner/align.py)。新设备 CPU FP32 离线真人录音推理与 worker 成功/失败结构通过监督验收；原生零时长会明确拒绝并保留全部诊断。旧录音/Gemini 对照、声学边界听审、日常对话/噪声条件和 GPU 推理仍未验收。下一步是设计 Node TimingPort 子进程适配器，再接完整输入 CLI；情绪适配器待实现。详见 [新设备验收记录](reviews/M02-local-forced-aligner-new-device.md)。
 
-## 已有环境与真实阻塞
+## 新设备已验环境（2026-10-02）
+
+当前项目根为 `E:\mutsumi\mutsumi`，运行路径从项目根解析。Windows10，Xeon E5-2673 v3（12核/24线程），约32GB内存，RTX2060 6GB。本机已有系统管理的2GB页面文件，模型 CPU FP32 加载与真人推理未复现1455；未修改驱动/页面文件。当前只验收 CPU，不假定旧设备 AMD 环境存在或本机 CUDA 已成功。
+
+- 忽略的 `.runtime/aligner-venv`：Python3.12.14、qwen-asr0.0.6、torch2.10.0+cpu、transformers4.57.6；pip check通过。详细固定依赖清单保留在 `.runtime/qa/aligner-freeze.txt`。
+- 官方模型仍固定 revision `c7cbfc2048c462b0d63a45797104fc9db3ad62b7`；模型字节数1,835,544,544，SHA256 `47831d0e82f96b20e9034dba01a075ee06436654719f6a68289e49f1b65ce0e7` 已验证。
+- LibriSpeech 真人朗读：一条录音返回10个有效原生字词区间；另一条出现 THE 2.32→2.32秒，worker返回invalid_alignment并保留全部17单元。官方中英文样本用于补充 SDK检查。没有补时、删除无效单元或用合成语音冒充验收。
+- 原仓库关闭ACL继承导致 Luna 沙箱拒绝写入。所有者批准修复，但 UAC 未完成；实际权限未改变。监督者在批准工作区内使用隔离 Git 工作树，Luna保持原workspace-write沙箱实现并逐文件提交，再将提交取回原本地主分支。临时工作树完成后清理，报告另存忽略目录；不使用无限制编码执行。
+- 所有者后续自行解决 Codex/VPN 代理问题，监督者没有修改代理/路由设置。恢复工作不应覆盖所有者当前配置。
+
+## 原设备环境与真实阻塞（历史）
 
 原设备 Windows，Ryzen5 7600，约32GB内存，AMD RX6950XT和集成 Radeon。项目本地环境如下，均被忽略且不会随 Git 下载：
 
@@ -47,7 +57,7 @@ uv venv --python 3.12 .runtime/aligner-directml-venv
 uv pip install --python .runtime/aligner-directml-venv/Scripts/python.exe "qwen-asr==0.0.6" "torch-directml==0.2.5.dev240914" "numpy<2" --index-url https://pypi.org/simple --link-mode=copy
 ```
 
-这些是 Windows 环境重建命令，尚不保证另一设备模型可运行。没有部署 worker 前，继续通过 Luna 完成任务和监督验收。其他操作系统先重新核对后端支持，不能硬套 Windows DirectML。
+这些是 Windows 环境重建命令，尚不保证另一设备模型可运行。worker 已部署并验收本机 CPU 路线；新设备仍须恢复独立环境/权重并重新进行真人推理。其他操作系统先重新核对后端支持，不能硬套 Windows DirectML，也不要在没有 RX6950XT 的设备选择此 worker 的 DirectML 选项。
 
 公开权重需在新设备重新下载（约1.84GB），Python中使用 `huggingface_hub.snapshot_download`，指定官方 repo `Qwen/Qwen3-ForcedAligner-0.6B`、上述 revision、`local_dir='data/models/Qwen3-ForcedAligner-0.6B'`、`token=False`，下载 json/txt/safetensors 文件。模型推理使用本地文件、不信任远程代码；录音不需要上传模型仓库。
 
