@@ -103,7 +103,7 @@ function snapshotAlignment(value: unknown, assetId: string, duration: number): V
   if (typeof transcript !== 'string' || transcript.trim().length === 0 || transcript.length > MAX_TRANSCRIPT) return null;
   const rawSegments = plainArray(root['segments'], MAX_SEGMENTS);
   if (rawSegments === null || rawSegments.length < 1) return null;
-  const segments: EmotionInput['segments'][number][] = [];
+  const segments: ValidatedEmotionAlignment['segments'][number][] = [];
   const ids = new Set<string>();
   let concatenated = '';
   let previousEnd = -1;
