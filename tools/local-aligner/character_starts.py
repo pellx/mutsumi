@@ -29,7 +29,8 @@ def validate_sentences(payload: Any, sample_rate: int, clip_frames: int) -> tupl
     transcript = payload.get('transcript')
     if type(transcript) is not str or not transcript.strip() or len(transcript) > 6000:
         _fail('input_invalid', 'Sentence file transcript is invalid.')
-    if payload.get('sample_rate') != sample_rate or payload.get('clip_frames') != clip_frames:
+    if (type(payload.get('sample_rate')) is not int or type(payload.get('clip_frames')) is not int
+            or payload['sample_rate'] != sample_rate or payload['clip_frames'] != clip_frames):
         _fail('input_invalid', 'Sentence file audio metadata does not match the WAV.')
     sentences = payload.get('sentences')
     if type(sentences) is not list or not 1 <= len(sentences) <= 100:
@@ -55,9 +56,11 @@ def validate_sentences(payload: Any, sample_rate: int, clip_frames: int) -> tupl
         status = item.get('status')
         if status == 'candidate':
             start, end = item.get('start_sample'), item.get('end_sample')
+            start_ms, end_ms = item.get('start_ms'), item.get('end_ms')
             if (type(start) is not int or type(end) is not int or not 0 <= start < end <= clip_frames
-                    or item.get('start_ms') != round(start * 1000 / sample_rate)
-                    or item.get('end_ms') != round(end * 1000 / sample_rate)):
+                    or type(start_ms) is not int or type(end_ms) is not int
+                    or start_ms != round(start * 1000 / sample_rate)
+                    or end_ms != round(end * 1000 / sample_rate)):
                 _fail('input_invalid', 'Candidate sample and millisecond bounds are invalid.')
         elif status not in ('unavailable', 'skipped'):
             _fail('input_invalid', 'Sentence status is invalid.')
@@ -73,12 +76,26 @@ def validate_sentences(payload: Any, sample_rate: int, clip_frames: int) -> tupl
     return transcript, validated
 
 
-def build_views(result: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+def build_views(result: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int | None]:
     units = result['units']
     lexical = [u for u in units if u.get('granularity') in ('character', 'word') and isinstance(u.get('text'), str)]
-    valid = (result.get('lexical_coverage') == 'complete' and bool(lexical)
-             and all(type(u.get('onset_ms')) is int and 0 <= u['onset_ms'] < result['sentence_end_ms'] for u in lexical)
-             and all(b['onset_ms'] >= a['onset_ms'] for a, b in zip(lexical, lexical[1:])))
+    raw_units = result.get('raw_units')
+    raw_starts = []
+    if type(raw_units) is list and len(raw_units) == len(units):
+        raw_starts = [u.get('start_time') if type(u) is dict else None for u in raw_units]
+    reasons_valid = all(u.get('reason') not in ('invalid_start_time', 'non_monotonic_onset', 'rounded_outside_sentence')
+                        for u in lexical)
+    native_valid = (len(raw_starts) == len(units)
+                    and all(type(raw_starts[u['index']]) in (int, float)
+                            and math.isfinite(raw_starts[u['index']])
+                            and 0 <= raw_starts[u['index']] <
+                                (result['sentence_end_ms'] - result['sentence_start_ms']) / 1000
+                            and result['sentence_start_ms'] <= u.get('onset_ms', -1) < result['sentence_end_ms']
+                            for u in lexical)
+                    and all(raw_starts[b['index']] >= raw_starts[a['index']]
+                            for a, b in zip(lexical, lexical[1:])))
+    valid = (result.get('lexical_coverage') == 'complete' and bool(lexical) and reasons_valid and native_valid
+             and all(type(u.get('onset_ms')) is int for u in lexical))
     markers = []
     if valid:
         groups = {}
@@ -98,7 +115,7 @@ def build_views(result: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict
                 cells.append({'boundary_start_ms': marker['onset_ms'], 'boundary_end_ms': end,
                               'occupancy_ms': end - marker['onset_ms'], 'unit_indices': marker['unit_indices'],
                               'kind': 'adjacent_onset_occupancy', 'quality': marker['ambiguity'] or 'distinct_onset'})
-    prefix = max(0, markers[0]['onset_ms'] - result['sentence_start_ms']) if markers else 0
+    prefix = max(0, markers[0]['onset_ms'] - result['sentence_start_ms']) if markers else None
     return markers, cells, prefix
 
 
