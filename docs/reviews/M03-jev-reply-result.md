@@ -1,0 +1,21 @@
+# M03 — TypeSafe Jev reply mapping acceptance (2026-10-02)
+
+Owner confirmed Gemini reply text reuses OhMyGPT gemini-3.8-flash; supervisor identified the described Jev project as TypeSafe AI from its official launch and documentation. Decision D31 records the identification and reproducible stable model pin jev-1.13.0. References checked: https://docs.typesafe.ai/introduction, https://docs.typesafe.ai/api, https://docs.typesafe.ai/models, https://docs.typesafe.ai/primitives/choice, https://docs.typesafe.ai/primitives/score and https://docs.typesafe.ai/confidence. Jev takes text/structured state and returns typed decisions, not generated text or audio. Chinese workload quality needs its own evaluation.
+
+## Implemented scope
+
+ChatGPT-authenticated gpt-6-luna CLI (medium effort, workspace-write/unelevated sandbox, no credentials) implemented only apps/server/src/providers/typesafe/jev-reply-result.ts. Supervisor immediately committed the one successful write; two earlier in-memory anchor assertions failed without creating the target, so they were not file writes. Final import check passed; supervisor inspected source and cherry-picked its individual commit into main (c9affbf). No ACL/global proxy/configuration change or push.
+
+buildJevReplyQuestions produces independent emotion Choice and intended-intensity Score questions. Initial granularity is ONE whole-reply expression segment. Options neutral/warm/cheerful/sympathetic/serious/unknown describe assistant expression, not input-user emotion. Five ordered intensity levels use a separate rubric; desired intensity is native probability-weighted index divided by4, never confidence. No phoneme timing, pause, pace or TTS capability is inferred.
+
+mapJevReplyResult validates plain own-data exact records, pinned returned model, exact answer/usage keys, complete finite probability distributions, highest-probability choice (ties allowed), native weighted score, matching legend and finite confidence. Unknown has no fabricated segment. Both native decisions and their probabilities/confidence/legend are copied into separately labelled evidence. Mapped text is EXACT supplied text; missing/malformed output throws a safe owned expression-stage invalid_result. Provider labels and mocks do not prove upstream authenticity or semantic correctness.
+
+## Independent checks
+
+Main repository TypeScript build passed using bundled Node24.19.0: node node_modules/typescript/bin/tsc -p tsconfig.json. Existing node --test tests/acceptance/*.test.mjs passed287 tests/19 suites. Ignored supervisor QA .runtime/qa/jev-reply-checks.mjs rerun against main passed29 checks; .runtime/qa/jev-reply-results.json retains results. Cases include fresh independent question objects, unchanged Chinese text/spaces, score/confidence separation, evidence copies, unknown, wrong model/choice/type/maximum, missing/extra/bad/sum-mismatched probabilities, nonfinite/numeric-string confidence, inconsistent/out-of-range score, wrong legend, extra answer/root properties, invalid usage/symbol/getters, unknown with bad intensity, blank/overlong/nonstring text and probability ties.
+
+## Limits and next work
+
+Accepted PURE REQUEST-QUESTION/RESULT MAPPING ONLY. No HTTP adapter, credential loading, processed-input CLI, runtime integration, live Gemini/Jev inference or human-recording-derived reply acceptance has been implemented by this file. Tests are synthetic JSON, not speech or emotional-quality evidence. Supervisor checked only whether TYPESAFE_API_KEY is configured in ignored root .env (false), with no value printed or sent to coding CLI. Its independent key is required for live TypeSafe access; existing OhMyGPT/Google/coding keys must not substitute.
+
+Next: implement independent OhMyGPT text and official TypeSafe HTTP adapters (one bounded call, safe error, streamed response byte cap, no retries/fallback), retain evidence in private application records, wire processed annotation/persona/history into CLI, then test real human-recording-derived Chinese replies. Confidence gating policy and phrase granularity remain separate design/acceptance choices; current mapper applies no hidden confidence threshold. The earlier input-aligner owner listening acceptance remains pending. No paid call or new external audio/conversation transfer occurred in this turn.
