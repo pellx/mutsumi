@@ -82,3 +82,19 @@ GitHub仅传输源码、测试、配置模板、文档与提交历史，不传�
 上一节的模型识别问题已解决：用户确认回复 Gemini 沿用 OhMyGPT gemini-3.8-flash；所述热门 JEV 已依据官方资料识别为 TypeSafe AI Jev，验收固定当前稳定 jev-1.13.0。官方请求 POST https://api.typesafe.ai/v1/systemone，独立 TYPESAFE_API_KEY；本地目前未配置该键，不得借用 relay/coding 密钥。
 
 Luna 已实现 [jev-reply-result.ts](../apps/server/src/providers/typesafe/jev-reply-result.ts)：独立 Choice 情绪类别与 Score 表达强度问题，严格校验原生概率/评分并保留置信信息，初版一条完整回复一个表达段，unknown 不编造默认情绪。29 项监督结构检查、构建和 287 项既有回归通过；[详细验收](reviews/M03-jev-reply-result.md)。仅映射层已验收；Gemini 文本/Jev HTTP 适配器、私有决策证据持久化、完整 CLI 和真人录音衍生回复质量验收仍待实现。无真实 Jev 调用、新数据外传或付费调用。本地逐文件提交，无 push。
+
+### 最新本机进展：人声分离、字起点与人格卡（2026-10-02）
+
+实际项目根 E:/mutsumi/mutsumi。本机硬件已重新核查，CPU链路可运行；不要沿用旧设备AMD/DirectML假设。用户手动解决代理，不再改代理/系统页面文件；仅本地逐文件提交，迁移设备时再同步，不 push。
+
+D32双TYPESAFE_API_KEY/TYPESAFE_API_KEY_2已由用户填写，均通过只读官方models鉴权检查；不代表额度或真实Jev推理已验收。JevHTTP/额度切换草稿尚未验收，保存在 E:/mutsumi/jev-quota-worker 独立提交中；不要删除或将语法坏草稿直接合入main。旧TypeScript解析器路径假设已纠正；未来用Node24的node:module.stripTypeScriptTypes作内存语法检查。Gemini继续已选OhMyGPT gemini-3.8-flash；Jev继续官方jev-1.13.0，各司文本/表达，不能替代。
+
+D33确认原音->分离人声->转写->句子范围->字起点；逐字不要求结束时间，重复起点仍歧义，不挪动插值。完整区间旧契约不放宽。详见 [设计](input-vocals-onsets-design.md)。tools/local-aligner/onset_result.py 已独立26项检查通过，但只是起点结果映射器，尚未接句子定位或融合CLI。
+
+本机隔离.runtime/separator-venv部署Demucs4.1.0/Torch2.10.0+cpu。默认 data/models/HTDemucs 是固定官方safetensors修订与哈希；真人“序列”录音本地分离已跑通，tools/vocal-separator/separate.py 已20项结构/异常测试和实际离线ownerworker验收通过；音质仍待听审。SF MP3头部帧数是估计值，真实解码229248frames/44100Hz=5.198367347s，16k分析83174frames=5.198375s；不要按头部246515frames去补齐或建立时间轴。[验收记录](reviews/M02-vocals-onset-pilot.md)。私有音轨/两次转写/raw结果在ignored data/acceptance/owner-sequence，QA在ignored .runtime/qa，部署虚拟环境不可跨设备整目录照搬。
+
+用户明确说“待会再核对，你先做别的模块”。不要重复催音频原话确认，不编造human-reference，不声称转写/句子/音素/输入情绪质量已通过。浏览器仅私有试听对照：127.0.0.1:8767（若仍运行）；原混音、vocals、accompaniment均可播放，两个未确认转写分别保留。人声不是去混响保证，情绪应独立检查分离是否改变语气。
+
+社区人格/记忆调研见 [草案](persona-memory-community-design.md)。Luna已实现 apps/server/src/domain/persona-card.ts，支持身份、性格/说话方式、规则、场景/关系设定、虚构风格示例及有authority标签的编排，保留旧Persona8条x1000字预算。28项独立检查、TypeScript构建、287项既有回归通过；[人格卡验收](reviews/M03-persona-card.md)。仅卡格式/编译器已验收，无默认人格激活、第三方卡下载、真实Gemini回复接入或长期记忆。Node24.19.0内置SQLite3.53.3已实测create/insert/select，但持久记忆尚未实现。
+
+下一步优先继续Gemini TextReplyPort/人格卡本地加载及MemoryPort持久化与相关性检索，再修复独立JevHTTP传输并接完整回复CLI；音频句子定位/裁剪/起点/输入情绪留待用户恢复听审分别验收。不要把短6轮history当长期记忆。每个应用文件继续由ChatGPT认证gpt-6-luna CLI写入，每次成功物理写立即单文件提交，监督者独立验收。所有新模块的Luna运行日志已保留在 .runtime/harness-runs 各worktree目录中。没有GitHub发布。
