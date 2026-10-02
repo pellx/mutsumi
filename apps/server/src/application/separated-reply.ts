@@ -1,4 +1,4 @@
-/** Separate bounded reply text generation from optional expression planning. */
+/** Separate bounded reply text generation from required independent expression decision. */
 import type { AudioAsset, AnnotatedAudio } from '../domain/annotation.ts';
 import type { DialogueContext, HistoryTurn, OwnerPreference, Persona, ReplyDraft, ReplyExpressionSegment, RoundFailure } from '../domain/conversation.ts';
 import { validateReplyDraft } from '../domain/conversation-validation.ts';
@@ -66,13 +66,16 @@ function makeGate(external: AbortSignal, deadlineMs: number): { signal: AbortSig
   const timer = setTimeout(() => controller.abort(makeRoundError('timed_out', 'dialogue')), deadlineMs);
   return { signal: controller.signal, cleanup: () => { clearTimeout(timer); external.removeEventListener('abort', onAbort); } };
 }
+function abortedError(signal: AbortSignal, stage: 'dialogue' | 'expression'): Error {
+  return makeRoundError(toRoundFailure(signal.reason, stage, signal).code, stage);
+}
 function bounded<T>(promise: Promise<T>, signal: AbortSignal, stage: 'dialogue' | 'expression'): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     const finish = (fn: () => void) => { if (settled) return; settled = true; signal.removeEventListener('abort', onAbort); fn(); };
     const onAbort = () => finish(() => reject(makeRoundError(signal.reason instanceof Error && toRoundFailure(signal.reason, stage).code === 'timed_out' ? 'timed_out' : 'cancelled', stage)));
     signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(value => finish(() => resolve(value)), () => finish(() => reject(makeRoundError('provider_failed', stage))));
+    promise.then(value => finish(() => resolve(value)), error => finish(() => reject(makeRoundError(toRoundFailure(error, stage, signal).code, stage))));
     if (signal.aborted) onAbort();
   });
 }
@@ -89,9 +92,9 @@ export async function generateSeparatedReply(
   const gate = makeGate(options.signal, deadline);
   let stage: 'dialogue' | 'expression' = 'dialogue';
   try {
-    if (gate.signal.aborted) throw makeRoundError('cancelled', stage);
+    if (gate.signal.aborted) return { text: null, emotion: null, stages: { text: 'failed', emotion: 'skipped' }, failure: toRoundFailure(gate.signal.reason, 'dialogue', gate.signal) };
     let rawText: unknown;
-    try { rawText = await bounded(Promise.resolve().then(() => deps.text.generate(structuredClone(context), { signal: gate.signal })), gate.signal, 'dialogue'); }
+    try { rawText = await bounded(Promise.resolve().then(() => { if (gate.signal.aborted) throw abortedError(gate.signal, 'dialogue'); return deps.text.generate(structuredClone(context), { signal: gate.signal }); }), gate.signal, 'dialogue'); }
     catch (error) { return { text: null, emotion: null, stages: { text: 'failed', emotion: 'skipped' }, failure: toRoundFailure(error, 'dialogue', gate.signal) }; }
     let text: TextReply;
     try { text = validateText(rawText); } catch (error) { return { text: null, emotion: null, stages: { text: 'failed', emotion: 'skipped' }, failure: toRoundFailure(error, 'dialogue') }; }
@@ -99,7 +102,7 @@ export async function generateSeparatedReply(
     if (gate.signal.aborted) return { text: structuredClone(text), emotion: null, stages: { text: 'ok', emotion: 'failed' }, failure: toRoundFailure(gate.signal.reason, stage, gate.signal) };
     const emotionInput = { reply_text: text.reply_text, context: structuredClone(context) };
     let rawEmotion: unknown;
-    try { rawEmotion = await bounded(Promise.resolve().then(() => deps.emotion.decide(structuredClone(emotionInput), { signal: gate.signal })), gate.signal, 'expression'); }
+    try { rawEmotion = await bounded(Promise.resolve().then(() => { if (gate.signal.aborted) throw abortedError(gate.signal, 'expression'); return deps.emotion.decide(structuredClone(emotionInput), { signal: gate.signal }); }), gate.signal, 'expression'); }
     catch (error) { return { text: structuredClone(text), emotion: null, stages: { text: 'ok', emotion: 'failed' }, failure: toRoundFailure(error, 'expression', gate.signal) }; }
     try {
       const emotion = validateEmotion(rawEmotion, text.reply_text);
