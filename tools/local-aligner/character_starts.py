@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from align import MODEL_DEFAULT, MODEL_FILES, PROJECT_ROOT, SOURCE, WorkerError, load_audio, project_path, raw_units
+from align import MODEL_DEFAULT, MODEL_FILES, PROJECT_ROOT, SOURCE, WorkerError, load_audio, lexical_key, project_path, raw_units
 from onset_result import map_character_onsets
 
 RATE = 16000
@@ -55,6 +55,8 @@ def validate_sentences(payload: Any, sample_rate: int, clip_frames: int) -> tupl
         cursor = te
         status = item.get('status')
         if status == 'candidate':
+            if not lexical_key(text):
+                _fail('input_invalid', 'Candidate sentence text must contain lexical content.')
             start, end = item.get('start_sample'), item.get('end_sample')
             start_ms, end_ms = item.get('start_ms'), item.get('end_ms')
             if (type(start) is not int or type(end) is not int or not 0 <= start < end <= clip_frames
@@ -88,8 +90,7 @@ def build_views(result: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict
     native_valid = (len(raw_starts) == len(units)
                     and all(type(raw_starts[u['index']]) in (int, float)
                             and math.isfinite(raw_starts[u['index']])
-                            and 0 <= raw_starts[u['index']] <
-                                (result['sentence_end_ms'] - result['sentence_start_ms']) / 1000
+                            and 0 <= raw_starts[u['index']]
                             and result['sentence_start_ms'] <= u.get('onset_ms', -1) < result['sentence_end_ms']
                             for u in lexical)
                     and all(raw_starts[b['index']] >= raw_starts[a['index']]
