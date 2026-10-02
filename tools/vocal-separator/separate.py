@@ -43,9 +43,17 @@ def positive_threads(value: str) -> int:
         raise argparse.ArgumentTypeError("threads must be an integer from 1 to 64")
     return number
 
-def project_path(value: str | Path) -> Path:
+def project_path(value: str | Path, error_code: str = "input_invalid") -> Path:
     path = Path(value)
-    return (path if path.is_absolute() else PROJECT_ROOT / path).resolve()
+    unresolved = path if path.is_absolute() else PROJECT_ROOT / path
+    try:
+        if unresolved.is_symlink() or (hasattr(unresolved, "is_junction") and unresolved.is_junction()):
+            raise WorkerError(error_code)
+        return unresolved.resolve()
+    except WorkerError:
+        raise
+    except Exception as exc:
+        raise WorkerError(error_code) from exc
 
 def fail_input():
     raise WorkerError("input_invalid")
@@ -69,12 +77,14 @@ def load_audio(path: Path):
     except Exception as exc:
         raise WorkerError("input_invalid") from exc
     if (samples.ndim != 2 or samples.shape[0] <= 0 or samples.shape[1] not in (1, 2) or
-            int(rate) != info.samplerate or not np.isfinite(samples).all() or not np.any(samples != 0)):
+            samples.shape[0] != info.frames or int(rate) != info.samplerate or
+            not np.isfinite(samples).all() or not np.any(samples != 0)):
         fail_input()
     return np.asarray(samples, dtype=np.float32), int(rate), int(samples.shape[0]), int(samples.shape[1])
 
 def validate_output_dir(path: Path) -> None:
-    if path.is_symlink() or (path.exists() and not path.is_dir()):
+    if (path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()) or
+            (path.exists() and not path.is_dir())):
         raise WorkerError("output_failed")
     if path.exists():
         try:
@@ -111,9 +121,9 @@ def validate_model(model_dir: Path) -> Path:
     return weight
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    audio_path = project_path(args.audio)
-    output_dir = project_path(args.output_dir)
-    model_dir = project_path(args.model_dir)
+    audio_path = project_path(args.audio, "input_invalid")
+    output_dir = project_path(args.output_dir, "output_failed")
+    model_dir = project_path(args.model_dir, "model_missing")
     validate_output_dir(output_dir)
     samples, input_rate, input_frames, input_channels = load_audio(audio_path)
     weight = validate_model(model_dir)
@@ -155,8 +165,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if model_frames <= 0 or not np.isfinite(samples).all():
         raise WorkerError("inference_failed")
     reference = torch.from_numpy(samples.T.copy()).to(dtype=torch.float32)
-    mean = reference.mean(dim=(0, 1), keepdim=True)
-    std = reference.std(dim=(0, 1), unbiased=True, keepdim=True)
+    mono_reference = reference.mean(dim=0)
+    mean = mono_reference.mean()
+    std = mono_reference.std(unbiased=True)
     if not torch.isfinite(mean).all() or not torch.isfinite(std).all() or not bool((std > 0).all()):
         raise WorkerError("input_invalid")
     normalized = (reference - mean) / std
@@ -170,7 +181,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         separated = separated * std + mean
         vocals = separated[3].cpu().numpy().T.astype(np.float32, copy=False)
         accompaniment = separated[[0, 1, 2]].sum(dim=0).cpu().numpy().T.astype(np.float32, copy=False)
-        if not np.isfinite(vocals).all() or not np.isfinite(accompaniment).all():
+        if (not np.isfinite(vocals).all() or not np.isfinite(accompaniment).all() or
+                vocals.size == 0 or accompaniment.size == 0):
             raise WorkerError("inference_failed")
     except WorkerError:
         raise
@@ -180,6 +192,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     analysis = scipy.signal.resample_poly(vocals.mean(axis=1), 160, 441, axis=0).astype(np.float32)
     arrays = (("vocals.wav", vocals, 44100, 2), ("accompaniment.wav", accompaniment, 44100, 2),
               ("vocals-analysis.wav", analysis[:, None], 16000, 1))
+    if analysis.size == 0 or not np.isfinite(analysis).all():
+        raise WorkerError("inference_failed")
     out_frames = {name: int(array.shape[0]) for name, array, _, _ in arrays}
     result = {
         "status": "ok", "schema_version": "vocal-0.1", "source_provider": "local",
@@ -213,15 +227,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             import soundfile as sf
             for (name, array, rate, _), _frames in zip(arrays, out_frames.values()):
                 destination = output_dir / name
-                if destination.resolve().parent != output_dir.resolve() or destination.exists():
+                if destination.resolve().parent != output_dir.resolve():
                     raise WorkerError("output_failed")
-                sf.write(str(destination), array, rate, format="WAV", subtype="FLOAT")
-                created.append(destination)
+                with destination.open("xb") as stream:
+                    created.append(destination)
+                    sf.write(stream, array, rate, format="WAV", subtype="FLOAT")
         manifest_path = output_dir / "separation.json"
-        if manifest_path.exists():
-            raise WorkerError("output_failed")
-        manifest_path.write_text(json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False), encoding="utf-8")
-        created.append(manifest_path)
+        with manifest_path.open("x", encoding="utf-8") as stream:
+            created.append(manifest_path)
+            stream.write(json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
     except Exception as exc:
         for path in created:
             try:
@@ -248,7 +262,8 @@ def main() -> int:
         stdout.reconfigure(encoding="utf-8")
     args = parser().parse_args()
     try:
-        result = run(args)
+        with contextlib.redirect_stdout(sys.stderr):
+            result = run(args)
     except WorkerError as exc:
         result = {"status": exc.code, "error": {"code": exc.code, "message": exc.message}}
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")), file=stdout)
