@@ -40,13 +40,13 @@ LibriSpeech is actual human audiobook reading from LibriVox, identified by corpu
 
 Private evidence: `data/acceptance/public-qwen/`, `data/acceptance/librispeech/`, `data/acceptance/native-pilot/` and `.runtime/qa/device-audit.json`. Private/raw native results and audio are ignored and not committed.
 
-## Worker implementation blocker
+## Initial worker implementation blocker (resolved)
 
 Luna launcher invocations used the approved task, `--effort=medium --timeout-ms=600000`, original workspace-write sandbox, unelevated Windows sandbox and approval_policy=never. First run found no target directory and stopped after a failed write. Supervisor created the empty target directory. Second run's Python write raised PermissionError; its report recorded a Windows sandbox filesystem denial. Neither run created/modified a tracked file.
 
 Read-only ACL inspection found the outer approved workspace `E:\mutsumi` has sandbox SID modify grants, while nested repository `E:\mutsumi\mutsumi` has inheritance disabled and does not inherit those grants. Normal sandboxed TypeScript emit also failed to create ignored `dist`, consistent with the repository ACL observation. No bypass/full-access coding run was used.
 
-Proposed concrete repair: `icacls E:\mutsumi\mutsumi /inheritance:e`, preserving explicit ACL entries and restoring parent inheritance only on this repository root. Automatic approval review rejected this operation because it persistently changes repository/descendant access and the owner had not approved that exact permission change. The command did not execute. Explicit owner approval is pending; do not treat elapsed time as approval or retry indirectly.
+Proposed concrete repair: `icacls E:\mutsumi\mutsumi /inheritance:e`, preserving explicit ACL entries and restoring parent inheritance only on this repository root. Automatic approval review rejected this operation because it persistently changes repository/descendant access and the owner had not approved that exact permission change. The command did not execute. Explicit owner approval was pending at that stage; approval subsequently arrived, as recorded in the delivery update below. The denied operation was not retried indirectly.
 
 Ignored coding reports:
 - `.runtime/harness-runs/2026-10-02T01-42-34.590Z/report.json`
@@ -90,7 +90,7 @@ Original local main commits (one file each):
 - `6f17036`: empty-result repair task brief.
 - `b877671`: explicit empty native result rejection and finite checks before rounding.
 
-Final worker Git blob: `6fabb85efa9b71bf0e044bf34e66f416a1b138b9`.
+Final worker Git blob: `6fabb85efa9b71bf0e044bf34e66f416a1b138b9`. Original main worktree is clean; the temporary worktree was removed after preserving reports. After transfer, supervisor also verified project-root-relative path resolution and argparse rejection of threads0,65/non-integer (usage exit2), without model loading. Help/argument-usage output follows argparse rather than the worker result JSON protocol.
 
 Independent checks:
 - 15 CLI checks passed: stdlib-only help; unreadable/blank/invalid transcript; absent/unreadable/non-WAV/stereo/wrong-rate/non-finite/silent/over-limit audio; missing model; genuine WAV in a .bin extension; actual human native success; actual human native zero-span rejection; unavailable requested DirectML. The 10 malformed-input checks plus missing-model case ran with heavyweight imports blocked, proving early rejection rather than a later load failure. These synthetic invalid waveforms do not count as speech acceptance.
