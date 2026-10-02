@@ -166,3 +166,15 @@ fumo按转写句末标点得到7个模型边界候选，真实采样裁剪7段�
 8769最新服务.runtime/qa/automatic-sentence-listening-server-final.mjs，静态报告data/acceptance/automatic-sentences-001-listening-final.html，展示两次通用程序新结果而非旧QA剪辑。12条音轨metadata通过；刷新原页查看。结构mock不当真人质量，全生产音频入口和更广泛样本、逐字起点、输入情绪仍待实现。无需新云调用，七段云审批拒绝仍延期。标准答案不放模型输入/编码提示；本地逐文件提交，无push。
 
 本任务工作树编码报告已复制并逐文件哈希校验到.runtime/harness-runs/automatic-sentence-worker/harness-runs，清理已合入干净工作树，Jev未验收工作树保留。监督QA审计/推理/结果对照脚本均在.runtime/qa、私人数据ignored，换设备如需复用应私下搬迁且重建虚拟环境，不expect正在运行进程迁移。
+
+### 每句字头占用区间与后续输入情绪（2026-10-03，D42）
+
+用户明确先分句、再在每句内部定位字/词开头、相邻起点形成占用区间，随后分析情绪。Luna新增tools/local-aligner/character_starts.py及providers/ohmygpt/ohmygpt-emotion.ts并经监督修复，所有tracked写入立即单文件提交，仅本地。独立验收见reviews/M02-character-starts-emotion.md，README有运行命令。字头17+7检查通过，真实fumo7/衣柜3逐句CPU离线推理154原生units/149正占用cells，重合起点分组，Fumo整词保留；衣柜第二句我/把重合，不伪造独立字头。没有单位end_ms，独立占用metadata包含停顿、末块到既有句尾；invalid/reversed/mismatch不生成有效cells。最终校验对两段真实输入通过，十句纯view重建与保存原生结果完全一致，未重复真实推理冒充新结果。
+
+输入情绪适配器36项独立结构/传输检查、完整TS构建及287现有回归通过，固定OhMyGPT gemini-3.8-flash、单次有界POST无回退/重试。EmotionInput只用原文/已有句界/IDs省略units，不把起点占用区间塞入旧发音Timing。D37已有提供录音上云授权下，本轮仅两段分离真人声音各一次：HTTP200,fumo7候选(首句happy其余neutral)耗时10484ms,衣柜3neutral耗时6553ms。原文/句界全保留，没有评分/逐字情绪。音频modality usage是服务返回声明，不当upstream独立真实性证明。字头准确性/情绪/原话仍待真人听审，production整段输入CLI和双来源上下文编排未接线。
+
+ignored data/acceptance/character-starts-001有output-1/output-2真实字头结果和emotion-1/emotion-2原始响应、projection、结果、hash/调用metadata。私人QA脚本/测试/logs在.runtime/qa。最新试听 http://127.0.0.1:8770/，.runtime/qa/character-starts-listening-server.mjs（当前session23139）显示10句播放器/149字块/中文候选情绪；浏览器10条duration真实通过且0零长块。数据静态listening.html随服务启动刷新。8769分句/8768原音对照保留，不expect进程迁移；仅本机服务，无系统代理/pagefile/driver改动。
+
+编码前几轮遇到主仓库ACL、裸python不可用及命令转义/锚点失败；无source写入时保留失败日志，Luna错误总结不当检查成功。所有应用源码最终由指定Luna在E:/mutsumi/onsets-emotion-worker完成，监督独立审查通过后合入。完整运行报告保存并哈希验证后清理本轮工作树；未验收E:/mutsumi/jev-quota-worker仍保留。没有push，私有音频/凭据不发送编码模型。七段素材云审批拒绝仍延期，TTS自定义音色比较继续暂缓。
+
+下一步先等用户试听字头/情绪反馈，修复一般能力而非喂样例标准答案；随后按任务继续生产CLI双来源上下文/人格与真实回复/记忆，Jev仅回复表达。不要宣称声学精度已经human accepted或整套生产语音程序已接通。
