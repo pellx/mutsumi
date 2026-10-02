@@ -70,3 +70,9 @@ GitHub仅传输源码、测试、配置模板、文档与提交历史，不传�
 当前实时轮次/VAD/打断/音频流均不在范围；对话/TTS云模型未选择。原有 mock 只验结构。先确保本地对齐实际运行，保留原生零/无效时间诊断并明确拒绝，不能用合成音频验收或把成功返回JSON当成切片准确。
 
 来源：[官方模型](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B)、[Qwen3-ASR代码](https://github.com/QwenLM/Qwen3-ASR)、[AMD Windows矩阵](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/compatibility/compatibilityrad/windows/windows_compatibility.html)、[DirectML](https://learn.microsoft.com/en-us/windows/ai/directml/pytorch-windows)。
+
+## 回复分阶段进展（2026-10-02，D30）
+
+用户明确要求：已处理语音 + 自定义人格/上下文 -> Gemini 生成回复文本 -> JEV 决定回复表达情绪。JEV 不能改写 Gemini 文本；输入说话人的情绪仍是独立分析，不是回复情绪。新的 [separated-reply.ts](../apps/server/src/application/separated-reply.ts) 由 ChatGPT 认证的 gpt-6-luna CLI 完成，监督者逐文件立即提交并合回 main。28 项新结构验收、TypeScript 构建及 287 项现有回归通过；[验收记录](reviews/M03-separated-reply.md) 说明范围和证据。文本和表达分别保留来源；JEV 缺失/失败保留文本，取消和共享截止时间均有结构检查。
+
+尚未接真实 Gemini/JEV、CLI 或旧 RoundService。已询问但尚未确认：回复 Gemini 是否沿用 OhMyGPT gemini-3.8-flash，以及 JEV 的准确项目/模型/API。不要自动选择替代模型、用 Gemini 输出充当 JEV 情绪、把结构 mock 当真人录音验收或声称 TTS 完成。本轮没有新外传音频或付费调用。此前强制对齐结果保留供用户后续听审。全部提交仅本地，迁移时再同步 GitHub。
