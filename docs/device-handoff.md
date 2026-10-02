@@ -76,3 +76,9 @@ GitHub仅传输源码、测试、配置模板、文档与提交历史，不传�
 用户明确要求：已处理语音 + 自定义人格/上下文 -> Gemini 生成回复文本 -> JEV 决定回复表达情绪。JEV 不能改写 Gemini 文本；输入说话人的情绪仍是独立分析，不是回复情绪。新的 [separated-reply.ts](../apps/server/src/application/separated-reply.ts) 由 ChatGPT 认证的 gpt-6-luna CLI 完成，监督者逐文件立即提交并合回 main。28 项新结构验收、TypeScript 构建及 287 项现有回归通过；[验收记录](reviews/M03-separated-reply.md) 说明范围和证据。文本和表达分别保留来源；JEV 缺失/失败保留文本，取消和共享截止时间均有结构检查。
 
 尚未接真实 Gemini/JEV、CLI 或旧 RoundService。已询问但尚未确认：回复 Gemini 是否沿用 OhMyGPT gemini-3.8-flash，以及 JEV 的准确项目/模型/API。不要自动选择替代模型、用 Gemini 输出充当 JEV 情绪、把结构 mock 当真人录音验收或声称 TTS 完成。本轮没有新外传音频或付费调用。此前强制对齐结果保留供用户后续听审。全部提交仅本地，迁移时再同步 GitHub。
+
+### 模型确认与 Jev 映射（D31，2026-10-02）
+
+上一节的模型识别问题已解决：用户确认回复 Gemini 沿用 OhMyGPT gemini-3.8-flash；所述热门 JEV 已依据官方资料识别为 TypeSafe AI Jev，验收固定当前稳定 jev-1.13.0。官方请求 POST https://api.typesafe.ai/v1/systemone，独立 TYPESAFE_API_KEY；本地目前未配置该键，不得借用 relay/coding 密钥。
+
+Luna 已实现 [jev-reply-result.ts](../apps/server/src/providers/typesafe/jev-reply-result.ts)：独立 Choice 情绪类别与 Score 表达强度问题，严格校验原生概率/评分并保留置信信息，初版一条完整回复一个表达段，unknown 不编造默认情绪。29 项监督结构检查、构建和 287 项既有回归通过；[详细验收](reviews/M03-jev-reply-result.md)。仅映射层已验收；Gemini 文本/Jev HTTP 适配器、私有决策证据持久化、完整 CLI 和真人录音衍生回复质量验收仍待实现。无真实 Jev 调用、新数据外传或付费调用。本地逐文件提交，无 push。
