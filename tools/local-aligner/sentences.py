@@ -128,8 +128,21 @@ def run(args):
 
     refinements = []
     timing_reasons = {"invalid_boundary_unit", "invalid_native_timing", "rounded_invalid_bounds", "overlapping_sentence_bounds"}
+    unit_ownership_counts = {}
+    for sentence in selected["sentences"]:
+        for unit_index in sentence["unit_indices"]:
+            unit_ownership_counts[unit_index] = unit_ownership_counts.get(unit_index, 0) + 1
+    shared_native_units = {unit_index for unit_index, count in unit_ownership_counts.items() if count > 1}
     for index, record in enumerate(selected["sentences"]):
         if record["status"] == "candidate":
+            continue
+        shared_owned = any(unit_index in shared_native_units for unit_index in record["unit_indices"])
+        if shared_owned:
+            original_reason = record.get("reason")
+            record.update(status="unavailable", reason="native_unit_crosses_sentence_boundary", start_sample=None,
+                end_sample=None, start_ms=None, end_ms=None)
+            refinements.append({"sentence_id": record["sentence_id"], "status": "unavailable", "reason": "ineligible_shared_native_units",
+                "coarse_rejection": original_reason, "original_reason": original_reason})
             continue
         if record.get("reason") not in timing_reasons:
             refinements.append({"sentence_id": record["sentence_id"], "status": "unavailable", "reason": "ineligible_non_timing_rejection",
