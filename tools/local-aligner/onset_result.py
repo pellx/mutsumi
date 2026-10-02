@@ -6,7 +6,7 @@ from typing import Any
 
 
 def _integer(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+    return type(value) is int
 
 
 def _raw(value: Any) -> Any:
@@ -21,7 +21,7 @@ def _lexical(value: str) -> str:
 
 
 def _spoken_character(value: str) -> bool:
-    return bool(value) and not value.isspace() and not unicodedata.category(value).startswith("P")
+    return len(value) == 1 and not value.isspace() and not unicodedata.category(value).startswith("P")
 
 
 def map_character_onsets(items, *, transcript, sentence_id, crop_start_sample, crop_frames,
@@ -29,7 +29,10 @@ def map_character_onsets(items, *, transcript, sentence_id, crop_start_sample, c
     """Map native aligner units to conservative clip-relative onset candidates."""
     if type(items) is not list or len(items) > 6000:
         raise ValueError("Invalid alignment units.")
-    if type(transcript) is not str or not transcript.strip() or len(_lexical(transcript)) > 6000:
+    if type(transcript) is not str or not transcript.strip() or len(transcript) > 6000:
+        raise ValueError("Invalid transcript.")
+    transcript_key = _lexical(transcript)
+    if not transcript_key:
         raise ValueError("Invalid transcript.")
     for value in (sentence_id, source):
         if type(value) is not str or not value.strip() or len(value) > 128:
@@ -38,7 +41,7 @@ def map_character_onsets(items, *, transcript, sentence_id, crop_start_sample, c
         raise ValueError("Invalid sample metadata.")
     if sample_rate <= 0 or sample_rate > 192000 or crop_start_sample < 0 or crop_frames <= 0 or clip_frames <= 0:
         raise ValueError("Invalid sample metadata.")
-    if crop_start_sample + crop_frames > clip_frames or clip_frames / sample_rate > 120:
+    if crop_start_sample + crop_frames > clip_frames or clip_frames > sample_rate * 120:
         raise ValueError("Invalid sample metadata.")
     raw = []
     for item in items:
@@ -54,7 +57,6 @@ def map_character_onsets(items, *, transcript, sentence_id, crop_start_sample, c
     crop_seconds = crop_frames / sample_rate
     crop_ms = crop_start_sample / sample_rate * 1000
     sentence_end_ms = round((crop_start_sample + crop_frames) / sample_rate * 1000)
-    transcript_key = _lexical(transcript)
     units = []
     valid_starts = {}
     lexical_parts = []
@@ -64,7 +66,7 @@ def map_character_onsets(items, *, transcript, sentence_id, crop_start_sample, c
             lexical_parts.append(text)
         normalized = unicodedata.normalize("NFC", text) if type(text) is str else ""
         lexical = _lexical(normalized) if type(text) is str else ""
-        char_unit = type(text) is str and _spoken_character(normalized) and len(lexical) == 1
+        char_unit = type(text) is str and _spoken_character(normalized)
         word_unit = type(text) is str and bool(lexical) and not char_unit
         granularity = "character" if char_unit else ("word" if word_unit else "unsupported")
         onset = None
@@ -87,7 +89,7 @@ def map_character_onsets(items, *, transcript, sentence_id, crop_start_sample, c
         units.append({"index": index, "text": text, "granularity": granularity,
                       "onset_ms": onset, "status": status, "reason": reason})
 
-    ordered = sorted(valid_starts, key=lambda i: i)
+    ordered = sorted(valid_starts)
     implicated = set()
     prior = None
     for index in ordered:
@@ -99,16 +101,15 @@ def map_character_onsets(items, *, transcript, sentence_id, crop_start_sample, c
         units[index]["reason"] = "non_monotonic_onset"
     same_ms = {}
     for index in ordered:
-        if units[index]["granularity"] == "character" and units[index]["reason"] is None:
-            same_ms.setdefault(units[index]["onset_ms"], []).append(index)
+        same_ms.setdefault(units[index]["onset_ms"], []).append(index)
     for indices in same_ms.values():
         if len(indices) > 1:
             for index in indices:
-                if units[index]["status"] == "candidate":
+                if units[index]["granularity"] == "character" and units[index]["status"] == "candidate":
                     units[index]["status"] = "ambiguous"
                     units[index]["reason"] = "indistinguishable_onset"
 
-    lexical_complete = bool(transcript_key) and bool(_lexical("".join(lexical_parts))) and _lexical("".join(lexical_parts)) == transcript_key
+    lexical_complete = bool(_lexical("".join(lexical_parts))) and _lexical("".join(lexical_parts)) == transcript_key
     if not lexical_complete:
         status = "invalid"
         coverage = "mismatch"
