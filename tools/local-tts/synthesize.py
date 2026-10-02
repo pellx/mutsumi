@@ -288,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
             raise WorkerError("output_exists") from None
         except Exception:
             raise WorkerError("write_failed") from None
-        print(json.dumps(manifest, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+        print(json.dumps(manifest, ensure_ascii=True, separators=(",", ":"), allow_nan=False))
         return 0
     except WorkerError as exc:
         for artifact in owned:
