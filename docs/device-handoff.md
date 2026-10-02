@@ -115,3 +115,14 @@ Actual synthesized private samples data/acceptance/local-tts/gentle-pilot/output
 README has rerun command; output folder must be new/empty. CPU RTF about10, insufficient for fluid dialogue currently. GPU/quantization/offload, Jev expression mapping and Gemini->Jev->TTS orchestration not implemented. Prior persona memory/reply/input backlogs unchanged, and owner deferred real input text/phonetic listening. Do not assume completed emotion synthesis quality or final persona voice.
 
 TTS worktree cleaned only after saving four Luna reports under .runtime/harness-runs/local-tts-worker/harness-runs; accepted files committed in main. Keep existing E:/mutsumi/jev-quota-worker (HEAD0f08afd) unaccepted quota-adapter draft; no TTS helper/coder left running. Existing loopback8766/8767 input-review servers may still be open; TTS samples presented as local WAV players, no external publication.
+
+
+### Latest owner direction: whole original audio + isolated speech (2026-10-03,D35/D36)
+
+Owner requires custom timbre, rejects preset-only CustomVoice as final TTS solution, and explicitly postpones Qwen3-TTS versus IndexTTS comparison. Preserve existing trial outputs; no new TTS deployment or cloning. Current focus returns to input audio.
+
+Owner says first separation seems fairly good and will supply more real recordings. This is preliminary subjective feedback on one sample; transcription/timing/emotion quality remains unaccepted. Do not synthesize input test recordings. New samples first support local mix/vocals/accompaniment comparisons and checking word-onset loss, distortion and leakage.
+
+D36 adds whole original-audio analysis BEFORE isolated-speech analysis, retaining overall scene/features/music/environment/effects and non-lexical human sounds/unknown. Use original waveform evidence, not accompaniment alone. Both whole context and speech text/available timing/voice cues go to bounded context for Gemini with stable owner persona/rules/selected memory; Jev remains reply-expression decision only. First whole-stage candidate reuses already selected Gemini audio route; no cloud calls this turn. New whole-specific output/context merge/sequence/actual reply remain unimplemented. Missing event times/confidence stay unknown, conflicting original/vocal transcriptions remain independent, no guesses promoted to persona rules or durable facts.
+
+Updated docs/input-vocals-onsets-design.md and D36; current target diagram appended to voice-system-flow.md with explicit not-implemented label, historical diagram retained. Initial automatic-review rejection of total-diagram rewrite was resolved by readonly verification of supervisor design authority and the actual AGENTS prohibition against changing architecture to make implementation appear compliant; approved append completed. No application code, criteria or global settings modified. All files individually committed locally, no push.
