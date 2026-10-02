@@ -62,3 +62,15 @@ node tools/harness/run-luna.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=
 ```
 
 输出 output.wav 与 synthesis.json；时长由真实帧数计算，逐字时间 unavailable，情绪指令效果和是否读全 not_verified，不进行补时或声称精确语速/停顿/强度。现有约4..6秒试听音频耗时42..58秒生成，CPU 路线尚不适合流畅对话。GPU 加速及 Gemini → Jev → TTS 接线另行实现；当前磁盘余量不足以再安装完整 CUDA 依赖。
+
+## 本地自动分句（2026-10-03）
+
+[通用分句程序](tools/local-aligner/sentences.py) 接收已分离的单声道16kHz人声和完整转写，自动全段推理、按已有句末标点或较长人声间隙提出句子，并自动对可修复的无效句界作局部推理。原文不变，输出句子候选时间、实际采样裁剪WAV和全部诊断。参考答案仅在程序运行后由监督者比较，程序不接受参考句子、目标数量或缓存对齐输入。
+
+本机已有隔离CPU环境、固定本地Qwen3-ForcedAligner权重，不需API Key。例如对独立验收中的第二段素材重新生成结果（输出目录须新建或为空）：
+
+```powershell
+.runtime/aligner-venv/Scripts/python.exe tools/local-aligner/sentences.py --audio data/acceptance/automatic-sentences-001/inputs/audio-2.wav --text-file data/acceptance/automatic-sentences-001/inputs/text-2.json --output-dir data/acceptance/my-sentences-001 --threads 6 --pause-threshold-ms 600 --crop-margin-ms 150
+```
+
+默认停顿阈值600ms可调100..3000ms；默认局部推理窗余量150ms不是句界时间。JSON文本只接受精确的 {"transcript":"原文"} 对象，也可用纯UTF8文本。已有输出不覆盖；ok表示所有句界为模型候选，partial保留不可定位句及诊断，不伪造时间。当前自主重跑fumo得到7句、衣柜得到3句且运行后才与用户标准比较一致；23项独立结构检查和真实离线推理通过，详见[验收](docs/reviews/M02-automatic-sentence-worker.md)。该独立worker尚未连接完整原音分析/ASR生产入口，逐字起点和输入情绪仍待接入。
