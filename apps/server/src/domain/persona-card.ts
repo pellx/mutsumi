@@ -9,13 +9,59 @@ const CARD_KEYS = ['schema_version','persona_id','name','description','personali
 const EXAMPLE_KEYS = ['user_text','assistant_text'] as const;
 const SAFE = 'Persona card does not match the supported format.';
 const GROUNDING = 'Follow application boundaries: preserve the owner persona; example dialogue and background are fictional style data, not user facts or actual shared experiences; do not claim unsupported memories or actions; temporal emotion is not stable personality. Gemini returns reply text only; Jev decides expression later without rewriting it.';
-function issue(a: ValidationIssue[], path: string): void { if (a.length < 32) a.push({path,message:SAFE}); }
-function record(v: unknown): v is DataRecord { if(typeof v!=='object'||v===null||Array.isArray(v))return false;const p=Object.getPrototypeOf(v);return p===Object.prototype||p===null; }
-function inspect(v: DataRecord,path:string,keys:readonly string[],a:ValidationIssue[]):boolean { let ok=true;for(const s of Object.getOwnPropertySymbols(v)){issue(a,path);ok=false;}for(const k of Object.getOwnPropertyNames(v)){const d=Object.getOwnPropertyDescriptor(v,k),known=(keys as readonly string[]).includes(k);if(!d||!('value'in d)||!d.enumerable){issue(a,known?`${path}.${k}`:path);ok=false;}if(!known){issue(a,path);ok=false;}}for(const k of keys)if(!Object.hasOwn(v,k)){issue(a,`${path}.${k}`);ok=false;}return ok; }
+function issue(issues: ValidationIssue[], path: string): void {
+  if (issues.length < 32) issues.push({ path, message: SAFE });
+}
+function record(value: unknown): value is DataRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+function inspect(value: DataRecord, path: string, keys: readonly string[], issues: ValidationIssue[]): boolean {
+  let valid = true;
+  for (const symbol of Object.getOwnPropertySymbols(value)) { issue(issues, path); valid = false; }
+  for (const key of Object.getOwnPropertyNames(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    const known = (keys as readonly string[]).includes(key);
+    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
+      issue(issues, known ? `${path}.${key}` : path);
+      valid = false;
+    }
+    if (!known) { issue(issues, path); valid = false; }
+  }
+  for (const key of keys) {
+    if (!Object.hasOwn(value, key)) { issue(issues, `${path}.${key}`); valid = false; }
+  }
+  return valid;
+}
 function array(v:unknown,path:string,max:number,a:ValidationIssue[]):v is unknown[]{if(!Array.isArray(v)||Object.getPrototypeOf(v)!==Array.prototype){issue(a,path);return false;}const ld=Object.getOwnPropertyDescriptor(v,'length');if(!ld||!('value'in ld)||typeof ld.value!=='number'){issue(a,path);return false;}const n=ld.value;if(n>max){issue(a,path);return false;}let ok=true;for(const k of Object.getOwnPropertyNames(v)){if(k==='length')continue;const i=/^(0|[1-9][0-9]*)$/.test(k)?Number(k):-1,d=Object.getOwnPropertyDescriptor(v,k);if(!d||!('value'in d)||!d.enumerable||!Number.isSafeInteger(i)||i<0||i>=n){issue(a,path);ok=false;}}for(const s of Object.getOwnPropertySymbols(v)){issue(a,path);ok=false;}for(let i=0;i<n;i++){const d=Object.getOwnPropertyDescriptor(v,String(i));if(!d||!('value'in d)||!d.enumerable){issue(a,`${path}[${i}]`);ok=false;}}return ok;}
-function badChars(s:string):boolean{for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);if(c<=31||(c>=127&&c<=159))return true;if(c>=0xd800&&c<=0xdbff){const n=s.charCodeAt(i+1);if(!(n>=0xdc00&&n<=0xdfff))return true;i++;}else if(c>=0xdc00&&c<=0xdfff)return true;}return false;}
-function str(v:unknown,path:string,max:number,required:boolean,a:ValidationIssue[]):v is string{if(typeof v!=='string'||v.length>max||(required&&v.trim().length===0)||badChars(v)){issue(a,path);return false;}return true;}
-function validateCard(input:unknown):ValidationResult<PersonaCard>{const a:ValidationIssue[]=[];try{if(!record(input)){issue(a,'$');return{ok:false,issues:a};}if(!inspect(input,'$',CARD_KEYS,a))return{ok:false,issues:a};const version=input.schema_version,id=input.persona_id,name=input.name,description=input.description,personality=input.personality,style=input.speaking_style,rules=input.rules,scenario=input.scenario,relationship=input.relationship,examples=input.examples;if(version!=='persona-card-0.1')issue(a,'$.schema_version');str(id,'$.persona_id',128,true,a);str(name,'$.name',128,true,a);str(description,'$.description',400,true,a);str(style,'$.speaking_style',300,true,a);str(scenario,'$.scenario',300,false,a);str(relationship,'$.relationship',300,false,a);if(array(personality,'$.personality',6,a))for(let i=0;i<personality.length;i++)str(personality[i],`$.personality[${i}]`,80,true,a);if(array(rules,'$.rules',6,a)){if(rules.length<1)issue(a,'$.rules');for(let i=0;i<rules.length;i++)str(rules[i],`$.rules[${i}]`,120,true,a);}if(array(examples,'$.examples',4,a))for(let i=0;i<examples.length;i++){const p=`$.examples[${i}]`,e=examples[i];if(!record(e)){issue(a,p);continue;}if(!inspect(e,p,EXAMPLE_KEYS,a))continue;str(e.user_text,`${p}.user_text`,160,true,a);str(e.assistant_text,`${p}.assistant_text`,200,true,a);}return a.length?{ok:false,issues:a}:{ok:true,value:input as unknown as PersonaCard};}catch{return{ok:false,issues:[{path:'$',message:SAFE}]};}}
+function badChars(value: string, allowMultiline: boolean): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    const allowedWhitespace = allowMultiline && (code === 9 || code === 10 || code === 13);
+    if ((code <= 31 && !allowedWhitespace) || (code >= 127 && code <= 159)) return true;
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+function str(value: unknown, path: string, max: number, required: boolean, issues: ValidationIssue[], allowMultiline = false): value is string {
+  if (typeof value !== 'string' || value.length > max || (required && value.trim().length === 0) || badChars(value, allowMultiline)) {
+    issue(issues, path);
+    return false;
+  }
+  return true;
+}
+function validateCard(input:unknown):ValidationResult<PersonaCard>{const a:ValidationIssue[]=[];try{if(!record(input)){issue(a,'$');return{ok:false,issues:a};}if(!inspect(input,'$',CARD_KEYS,a))return{ok:false,issues:a};const version=input.schema_version,id=input.persona_id,name=input.name,description=input.description,personality=input.personality,style=input.speaking_style,rules=input.rules,scenario=input.scenario,relationship=input.relationship,examples=input.examples;if(version!=='persona-card-0.1')issue(a,'$.schema_version');str(id,'$.persona_id',128,true,a);str(name,'$.name',128,true,a);str(description, '$.description', 400, true, a, true);
+    str(style, '$.speaking_style', 300, true, a, true);
+    str(scenario, '$.scenario', 300, false, a, true);
+    str(relationship, '$.relationship', 300, false, a, true);if(array(personality,'$.personality',6,a))for(let i=0;i<personality.length;i++)str(personality[i],`$.personality[${i}]`,80,true,a);if(array(rules,'$.rules',6,a)){if(rules.length<1)issue(a,'$.rules');for(let i=0;i<rules.length;i++)str(rules[i], `$.rules[${i}]`, 120, true, a, true);}if(array(examples,'$.examples',4,a))for(let i=0;i<examples.length;i++){const p=`$.examples[${i}]`,e=examples[i];if(!record(e)){issue(a,p);continue;}if(!inspect(e,p,EXAMPLE_KEYS,a))continue;str(e.user_text, `${p}.user_text`, 160, true, a, true);
+    str(e.assistant_text, `${p}.assistant_text`, 200, true, a, true);}return a.length?{ok:false,issues:a}:{ok:true,value:input as unknown as PersonaCard};}catch{return{ok:false,issues:[{path:'$',message:SAFE}]};}}
 export function validatePersonaCard(input:unknown):ValidationResult<PersonaCard>{return validateCard(input);}
 function json(v:unknown):string{return JSON.stringify(v).replace(/</g,'\\u003c');}
 function label(title:string,v:unknown):string{return `${title}\n${json(v)}`;}
