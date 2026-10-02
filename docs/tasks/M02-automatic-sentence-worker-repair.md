@@ -1,0 +1,10 @@
+# M02 automatic sentence worker safety repair
+
+ONLY read/write tools/local-aligner/sentences.py, gpt-6-luna ChatGPT CLI. ONE complete physical write after in-memory ast.parse; readonly syntax check then STOP for immediate supervisor commit. No private data/env/runtime/network/otherfiles/git/inference. Preserve API and default selection; no references/cases/timingconstants.
+
+Supervisor independent review found missing requirements:
+1. Before refinement, reject ineligible record.reason lexical_mismatch/native_unit_crosses_sentence_boundary (and other non-timing ownership failures) explicitly. Use eligible timing reasons {invalid_boundary_unit,invalid_native_timing,rounded_invalid_bounds,overlapping_sentence_bounds}; require owned nonempty and ALL owned starts finite numeric inrange, NONDECREASING. Never infer a split of crossing native word by cropping it. Retain original unavailability and diagnostic reason.
+2. invoke currently maps crop with punctuation default. Add optional keyword single_part=False, whenTrue map_sentence_bounds(native,transcript=text,...,sentence_texts=[text],segmentation_source='crop_local_single_part'); cropcaller invoke(...,single_part=True). Coarsecall untouched. Store full crop_map or crop_record in refinementdiagnostics along with raw/window/coarse rejection, so localbounds and accepted/failed provenance is reviewable without relying oncoarseunitindices.
+3. Candidate WAV write must be exclusive: open target in xb, then sf.write(file_handle,samples,rate,subtype='FLOAT',format='WAV'), not sf.write(path) which overwrites files introduced during inference. Do not delete partialresults on outputerror; strict inputs/global nooverwrite policy retained.
+
+Use UTF8 OutputEncoding, verified absolute Python C:/Users/anpel/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe -X utf8. Read encodingutf8; verifiedanchors once each; construct complete proposed source ast.parse beforewrite once. Do not reformat unrelated code or add othermodules. Stop after readonlysyntax.
