@@ -146,3 +146,13 @@ Updated docs/input-vocals-onsets-design.md and D36; current target diagram appen
 fumo按转写句末标点得到7个模型边界候选，真实采样裁剪7段可试听；句界听审仍待用户。衣柜无句末标点且末字零时长，仅保留一个single_span_unverified、bounds unavailable，不造边界。下一步需文字不变的语义分句提案/声学句尾定位，以及每句裁剪后本地逐字起点推理；目前mapper不加载模型，监督QA调用既有align.py，不是生产CLI已接线。私人输出在owner-fumo/owner-wardrobe的sentence-pilot-001。新试听 http://127.0.0.1:8769/（进程仍运行时），旧原音分离对照8768；9条音轨Edge元数据检查和页面截图通过不等于听审。
 
 用户新提供中文人声素材_7段.zip已安全解包到ignored data/acceptance/owner-seven-001，7段约10s48k双声道PCM16，原始哈希/帧数在inputs.json，source-notes.txt只作未核验来源说明。自动审批拒绝新14次云端计划，尚未执行；用户随后转本地分句，七段未做分离/云端识别。不要自行绕过拒绝。全部密钥/录音/QA原始响应保持忽略，不推送。Luna无写入启动/编码问题、原稿恢复和后续修复完整证据另存主仓库.runtime/harness-runs/sentence-worker及.runtime/qa。
+
+### 衣柜三句与长停顿自动分句（2026-10-03，D39/D40）
+
+用户确认fumo7句试听没有问题，衣柜原来只显示整段不算分句。随后用户给出三句参考并要求较长停顿分句。Luna扩展sentence_result.py支持原文精确拼接的外部分句+来源；新增pause_sentences.py，默认600ms的本地原生单位间隙提出分句、可调100..3000ms。监督16项新接口/35项原有边界/25项停顿检查通过，已逐文件单独提交。详见[衣柜修复验收](reviews/M02-wardrobe-pause-sentences.md)。默认阈值是初始工程值，模型词间时间不是人工声学参考或完整VAD；生产CLI仍未接线。
+
+停顿算法仅用原文和全段原生时间，自行得到与用户参考完全一致三句，两个候选间隙720/1440ms，原文空格/标点逐字保留。第三句原全段末字零区间仍拒绝；一次本地Qwen CPU局部真实人声推理得到末字正区间，按实际119200sample裁剪偏移加回，第三句候选7.61..9.85s，窗口7.45s起点未充当句界。最终三句0..2.56s、3.28..6.16s、7.61..9.85s，均实际采样裁剪。owner-wardrobe/sentence-pilot-002是人工分句参考/局部推理证据，sentence-pilot-003实际由自动停顿模块驱动，保留全段拒绝和局部原生证据。
+
+8769最新运行QA服务 .runtime/qa/sentence-listening-server-003.mjs，静态报告data/acceptance/sentence-pilot-003-listening.html；用户需刷新原页即可见衣柜三句。fumo7句保留；全页12条音轨Edge元数据检查通过。衣柜新句首尾仍待试听，不把分句文本一致当声学正确。不再需要此前计划的Gemini语义提案，本轮无云端调用、无新七段处理、无TTS/Jev变更。下一步推进逐句字符起点推理/输入情绪与双结果上下文；音频阶段应保持原文和局部裁剪时钟证据。
+
+本任务Luna记录已复制到主仓库.runtime/harness-runs/semantic-sentence-worker/harness-runs并逐文件哈希验证，已合入且干净的工作树移除；未验收Jev工作树保留。应用源码仍仅Luna CLI编写，监督QA在忽略目录；本地提交不push。
