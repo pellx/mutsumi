@@ -133,6 +133,8 @@ def map_alignment(items: Any, transcript: str, duration: float) -> tuple[list[di
     if not isinstance(items, (list, tuple)):
         raise WorkerError("invalid_alignment", "Aligner returned an invalid unit list.", [])
     diagnostics = raw_units(items)
+    if not items:
+        raise WorkerError("invalid_alignment", "Aligner returned no alignment units.", diagnostics)
     mapped: list[dict[str, Any]] = []
     invalid = False
     texts: list[str] = []
@@ -149,10 +151,12 @@ def map_alignment(items: Any, transcript: str, duration: float) -> tuple[list[di
         valid = isinstance(unit_text, str) and bool(unit_text.strip()) and numeric(start) and numeric(end)
         if valid:
             start_num, end_num = float(start), float(end)
-            start_ms, end_ms = round(start_num * 1000), round(end_num * 1000)
-            valid = (math.isfinite(start_num) and math.isfinite(end_num) and start_num >= 0 and
-                     end_num > start_num and end_num <= duration and start_ms >= 0 and
-                     end_ms > start_ms and end_ms <= round(duration * 1000))
+            if math.isfinite(start_num) and math.isfinite(end_num):
+                start_ms, end_ms = round(start_num * 1000), round(end_num * 1000)
+                valid = (start_num >= 0 and end_num > start_num and end_num <= duration and
+                         start_ms >= 0 and end_ms > start_ms and end_ms <= round(duration * 1000))
+            else:
+                valid = False
         else:
             start_num = end_num = 0.0
             start_ms = end_ms = 0
