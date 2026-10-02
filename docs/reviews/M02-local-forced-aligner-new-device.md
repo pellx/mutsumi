@@ -4,7 +4,7 @@ Date: 2026-10-02 (Asia/Shanghai). Supervisor inspection; application implementer
 
 ## Acceptance status
 
-Local official-model CPU FP32 deployment and actual offline speech inference are verified on this device. The application worker is NOT implemented or accepted: both Luna runs stopped without creating `tools/local-aligner/align.py`. The second run was denied by the Windows workspace-write sandbox. Owner-recording/Gemini-reference comparison, acoustic boundary listening, daily conversational/noisy speech, CUDA, DirectML and the Node subprocess adapter remain unverified. Do not interpret SDK results as worker or full input-pipeline acceptance.
+Local official-model CPU FP32 deployment, the standalone `tools/local-aligner/align.py` worker, strict success/failure behavior and actual offline human-recorded inference are independently verified on this device. Application code was authored exclusively by ChatGPT-authenticated gpt-6-luna Codex CLI and individually committed after each write. Owner-recording/Gemini-reference comparison, acoustic boundary listening, daily conversational/noisy speech, CUDA, DirectML inference and the Node subprocess adapter remain unverified. A successful worker result is not full input-pipeline or acoustic-quality acceptance.
 
 ## This device, independently measured
 
@@ -52,7 +52,7 @@ Ignored coding reports:
 - `.runtime/harness-runs/2026-10-02T01-42-34.590Z/report.json`
 - `.runtime/harness-runs/2026-10-02T01-47-44.497Z/report.json`
 
-After authorized permission repair: rerun the same Luna task; immediately commit its one target write; independently inspect/retest the worker, especially pre-load input rejection, strict one-JSON stdout, offline loading and raw invalid-span retention using the known native THE zero-span case. Repair application code through Luna one file/write/commit at a time. Do not advance to the Node adapter or claim module acceptance before this completes.
+This was the initial blocker, subsequently resolved without an ACL change as described below. No blocked/full-access coding workaround was used.
 
 ## Existing project checks
 
@@ -75,3 +75,38 @@ With an approved supervisor execution outside the failing filesystem sandbox, bu
 - [LibriSpeech human audiobook corpus and license](https://www.openslr.org/12)
 - [Public human-recording subset](https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy), revision `5be91486e11a2d616f4ec5db8d3fd248585ac07a`
 - [OpenAI official Windows sandbox configuration](https://learn.chatgpt.com/docs/config-file/config-basic)
+
+
+## Worker delivery and independent acceptance update
+
+Owner subsequently approved the exact ACL inheritance repair, but the ordinary Windows process lacked WRITE_DAC and the administrator/UAC attempt was reported cancelled. The repository ACL was unchanged. Supervisor instead created `E:\mutsumi\aligner-worker`, an isolated local Git worktree inside the already-approved outer workspace. It inherited that workspace's existing sandbox permissions; Luna retained workspace-write, approval_policy=never and the original unelevated Windows sandbox. No coding agent ran unrestricted or as administrator. All accepted commits were taken back into the original local main branch; canonical Git blob IDs match despite checkout CRLF/LF differences.
+
+Luna first delivered the worker, then implemented two separately tasked repairs. Supervisor immediately committed each source write before any further source edit. Initial inspection/verification rejected a valid-SDK-unit dictionary-access bug, late rejection of FLAC, missing offline protection, incomplete diagnostics and generic1455 messages. Subsequent mock verification also rejected an empty native unit list being reported as ok. These are fixed in the accepted version; no acceptance requirement was weakened.
+
+Original local main commits (one file each):
+- `5ae0e2a`: initial worker.
+- `cc61132`: first repair task brief.
+- `3a273f4`: strict validation, offline flags and full JSON-safe native diagnostics.
+- `6f17036`: empty-result repair task brief.
+- `b877671`: explicit empty native result rejection and finite checks before rounding.
+
+Final worker Git blob: `6fabb85efa9b71bf0e044bf34e66f416a1b138b9`.
+
+Independent checks:
+- 15 CLI checks passed: stdlib-only help; unreadable/blank/invalid transcript; absent/unreadable/non-WAV/stereo/wrong-rate/non-finite/silent/over-limit audio; missing model; genuine WAV in a .bin extension; actual human native success; actual human native zero-span rejection; unavailable requested DirectML. The 10 malformed-input checks plus missing-model case ran with heavyweight imports blocked, proving early rejection rather than a later load failure. These synthetic invalid waveforms do not count as speech acceptance.
+- 10 isolated mocked SDK structure cases passed after the reviewed repairs: valid result, zero span, positive seconds collapsing to zero milliseconds, NaN, lexical mismatch, empty items, numeric-string timestamp, boolean timestamp, load1455 and inference1455. Mock import/load/inference logging appeared only on stderr; stdout remained one standards-compliant JSON object. Invalid completed alignment retained all native units. NaN retained an explicit non_finite tag; no NaN/Infinity JSON literal escaped. Only affected empty/non-finite cases were rerun after the minimal second repair; unrelated checks are evidence from the unchanged reviewed paths.
+- Six pure checks passed: exact numeric/plain-text preservation, exact Unicode/whitespace preservation, NFC/punctuation coverage comparison, preserved multi-character native units, direct1455 and nested1455 detection. The final pure non-finite mapping behavior was additionally checked after repair.
+- Final original-main worker was independently run with socket connections blocked: LibriSpeech human sample `1272-128104-0001`, duration4815ms, 10 positive native units, status ok, exit0, CPU FP32. Actual worker load_ms15925 includes SDK import/setup; inference_ms784. The earlier worktree worker invocation recorded load_ms36057/inference_ms813. These observed startup costs differ from the SDK-only loading measurements above; no latency guarantee is implied.
+- Human sample `1272-128104-0000` returned exit1/invalid_alignment and all17 native raw units, including THE at2.32 to2.32s. No unit was removed or assigned a fabricated duration. Lexical text was not corrected.
+
+Evidence and supervisor-only scripts remain ignored: `.runtime/qa/worker-checks.py`, `worker-checks.json`, `mock-worker-case.py`, `mock-worker-results.json`, `pure-worker-checks.json`, `main-worker-offline-check.json`; real WAVs/native results remain under ignored `data/acceptance/`. Coding runs never accessed these recordings/results. Their reports were preserved under `.runtime/harness-runs/local-aligner-worktree/` before cleanup.
+
+User confirmed D29: commit locally and synchronize with GitHub when device migration is needed. No push was performed or tested. A subsequent request to configure a Codex-only VPN proxy was cancelled by the user after they resolved it manually; supervisor only inspected settings and made no network/proxy/port-forwarding changes.
+
+Reproduce with the project-local CPU environment after restoring the ignored model and chosen human WAV/transcript:
+
+```powershell
+.runtime/aligner-venv/Scripts/python.exe tools/local-aligner/align.py --audio data/acceptance/native-pilot/librispeech-second.wav --text-file data/acceptance/librispeech/text-second.json --language English
+```
+
+This worker task is accepted for its bounded CLI/CPU runtime scope. The complete separated input pipeline, the owner's old recording with retained Gemini text, acoustic listening and untested backends remain separate pending work. Native zero-duration predictions can still occur and must remain explicit failures.
