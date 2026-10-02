@@ -1,0 +1,9 @@
+# M03 separated reply cancellation repair
+
+Repair ONLY apps/server/src/application/separated-reply.ts; read this file and apps/server/src/application/round-errors.ts only. Context preloaded. Existing committed first draft has three concrete defects.
+
+1. Already-aborted external signal currently throws outside the inner text-stage catch. Return {text:null,emotion:null,stages:{text:'failed',emotion:'skipped'},failure:toRoundFailure(gate.signal.reason,'dialogue',gate.signal)} instead, zero port calls, still cleanup in finally.
+2. Provider calls are deferred in Promise.resolve().then. Add a gate.signal.aborted guard INSIDE each deferred callback immediately before generate/decide, throwing an owned cancelled/timed_out error or gate signal reason safely. This prevents an external abort between invocation and its first microtask from causing an unnecessary provider call. Retain race, late rejection observation, result retention and safe toRoundFailure handling.
+3. bounded currently maps EVERY rejected provider promise to provider_failed. Preserve trusted makeRoundError codes such as provider_unavailable by reducing the caught rejection with toRoundFailure(error,stage,signal) and recreating a safe owned error; foreign exception text stays hidden. Never inspect arbitrary error.message/code.
+
+Change top comment from optional expression planning to required independent expression decision: owner requires Gemini text THEN JEV emotion. Do not change schemas, providers, live wiring, public result shape, tests or any other files. Exactly ONE physical successful write, no repair/rewrite afterward. Verify expected anchor matches in memory before write. Read-only check: node --experimental-strip-types -e "import('./apps/server/src/application/separated-reply.ts').then(()=>console.log('import ok'))". No temp scripts, git mutation, env/data/.runtime inspection, network or delegation. Stop after check; supervisor commits then independently tests.
