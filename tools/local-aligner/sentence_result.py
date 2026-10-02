@@ -7,39 +7,38 @@ from typing import Any
 
 def _lexical_key(value: str) -> str:
     normalized = unicodedata.normalize("NFC", value)
-    return "".join(
-        character
-        for character in normalized
-        if not character.isspace() and not unicodedata.category(character).startswith("P")
-    )
+    return "".join(character for character in normalized if not character.isspace() and not unicodedata.category(character).startswith("P"))
 
 
 def _split_spans(transcript: str) -> list[tuple[str, int, int]]:
-    spans: list[tuple[str, int, int]] = []
+    # Lexical validation is performed by the caller before splitting.
     length = len(transcript)
+    terminal = "\u3002\uff01\uff1f!?\r\n"
+    closers = "\"'\u201d\u2019\u300d\u300f\u3011\u300b\u3009\u3014\uff3d\uff5d"
+    spans: list[tuple[str, int, int]] = []
+    lexical_positions = [i for i, char in enumerate(transcript) if _lexical_key(char)]
+    if not lexical_positions:
+        return spans
+    first_lex = lexical_positions[0]
+    last_lex = lexical_positions[-1]
     start = 0
-    index = 0
-    terminal = "。！？!?\r\n"
-    closers = "\"'”’」』】）》〉〕］｝】"
-
-    def append_span(end: int) -> None:
-        text = transcript[start:end]
-        if _lexical_key(text):
-            spans.append((text, start, end))
-
-    while index < length:
+    index = first_lex
+    while index <= last_lex:
         if transcript[index] in terminal:
-            index += 1
-            while index < length and transcript[index] in terminal:
-                index += 1
-            while index < length and transcript[index] in closers:
-                index += 1
-            append_span(index)
-            start = index
-        else:
-            index += 1
-    if start < length:
-        append_span(length)
+            end = index + 1
+            while end <= last_lex and transcript[end] in terminal:
+                end += 1
+            while end <= last_lex and transcript[end] in closers:
+                end += 1
+            # A terminal creates a boundary only when another lexical character follows.
+            next_lex = next((p for p in lexical_positions if p >= end), None)
+            if next_lex is not None:
+                spans.append((transcript[start:end], start, end))
+                start = end
+                index = max(end, next_lex)
+                continue
+        index += 1
+    spans.append((transcript[start:], start, length))
     return spans
 
 
@@ -66,18 +65,14 @@ def _copy_json(value: Any) -> Any:
     return value
 
 
-def map_sentence_bounds(
-    items: list[dict[str, Any]],
-    *,
-    transcript: str,
-    sample_rate: int,
-    clip_frames: int,
-    source: str,
-) -> dict[str, Any]:
+def map_sentence_bounds(items: list[dict[str, Any]], *, transcript: str, sample_rate: int, clip_frames: int, source: str) -> dict[str, Any]:
     if not isinstance(items, list) or len(items) > 6000:
         raise ValueError("items must be a list of at most 6000 units")
     if not isinstance(transcript, str) or not 1 <= len(transcript) <= 6000 or not transcript.strip():
         raise ValueError("transcript must be nonblank text of at most 6000 characters")
+    transcript_key = _lexical_key(transcript)
+    if not transcript_key:
+        raise ValueError("transcript must contain lexical text")
     if type(sample_rate) is not int or not 1 <= sample_rate <= 192000:
         raise ValueError("sample_rate is out of range")
     if type(clip_frames) is not int or clip_frames <= 0 or clip_frames > sample_rate * 120:
@@ -101,64 +96,47 @@ def map_sentence_bounds(
     spans = _split_spans(transcript)
     if len(spans) > 128:
         raise ValueError("transcript has more than 128 sentence candidates")
-    transcript_key = _lexical_key(transcript)
     native_key = "".join(_lexical_key(unit[0]) for unit in normalized)
     coverage = "exact" if transcript_key == native_key else "mismatch"
     duration = clip_frames / sample_rate
     sentence_records: list[dict[str, Any]] = []
 
-    if coverage == "exact" and spans:
-        unit_cursor = 0
-        lexical_cursor = 0
-        assignments: list[list[int]] = []
-        boundary_crossing: set[int] = set()
-        for span_index, (span_text, _, _) in enumerate(spans):
-            span_length = len(_lexical_key(span_text))
-            span_end = lexical_cursor + span_length
-            assigned: list[int] = []
-            while unit_cursor < len(normalized) and lexical_cursor < span_end:
-                unit_text_length = len(_lexical_key(normalized[unit_cursor][0]))
-                next_cursor = lexical_cursor + unit_text_length
-                assigned.append(unit_cursor)
-                if next_cursor > span_end:
-                    boundary_crossing.add(span_index)
-                    if span_index + 1 < len(spans):
-                        boundary_crossing.add(span_index + 1)
-                lexical_cursor = next_cursor
-                unit_cursor += 1
-            assignments.append(assigned)
-        for span_index, ((span_text, text_start, text_end), indices) in enumerate(zip(spans, assignments)):
-            sentence_records.append({
-                "sentence_id": f"sentence-{span_index + 1}",
-                "text": span_text,
-                "text_start": text_start,
-                "text_end": text_end,
-                "status": "unavailable",
-                "reason": None,
-                "start_sample": None,
-                "end_sample": None,
-                "start_ms": None,
-                "end_ms": None,
-                "unit_indices": indices,
-                "zero_interval_count": sum(
-                    1 for unit_index in indices
-                    if normalized[unit_index][1] is not None
-                    and normalized[unit_index][2] is not None
-                    and normalized[unit_index][1] == normalized[unit_index][2]
-                ),
-            })
-            if span_index in boundary_crossing:
-                sentence_records[-1]["reason"] = "native_unit_crosses_sentence_boundary"
+    if coverage == "exact":
+        span_lengths = [len(_lexical_key(text)) for text, _, _ in spans]
+        span_ranges = []
+        cursor = 0
+        for size in span_lengths:
+            span_ranges.append((cursor, cursor + size))
+            cursor += size
+        unit_ranges = []
+        cursor = 0
+        for text, _, _, _ in normalized:
+            size = len(_lexical_key(text))
+            unit_ranges.append((cursor, cursor + size))
+            cursor += size
+        assignments: list[list[int]] = [[] for _ in spans]
+        crossing: set[int] = set()
+        for ui, (ua, ub) in enumerate(unit_ranges):
+            covered = []
+            for si, (sa, sb) in enumerate(span_ranges):
+                if ua < sb and ub > sa:
+                    assignments[si].append(ui)
+                    covered.append(si)
+                    if ua < sa or ub > sb:
+                        crossing.add(si)
+            if len(covered) > 1:
+                crossing.update(covered)
+        for index, ((span_text, text_start, text_end), indices) in enumerate(zip(spans, assignments)):
+            sentence_records.append({"sentence_id": f"sentence-{index + 1}", "text": span_text, "text_start": text_start, "text_end": text_end, "status": "unavailable", "reason": "native_unit_crosses_sentence_boundary" if index in crossing else None, "start_sample": None, "end_sample": None, "start_ms": None, "end_ms": None, "unit_indices": indices, "zero_interval_count": sum(1 for ui in indices if normalized[ui][1] is not None and normalized[ui][2] is not None and normalized[ui][1] == normalized[ui][2])})
 
+        edge_pairs = []
         for index, record in enumerate(sentence_records):
-            if record["reason"] is not None:
-                continue
             indices = record["unit_indices"]
-            bounds: list[tuple[float, float]] = []
+            bounds = []
             invalid = False
             previous_start = previous_end = None
-            for unit_index in indices:
-                _, start_time, end_time, tagged_invalid = normalized[unit_index]
+            for ui in indices:
+                _, start_time, end_time, tagged_invalid = normalized[ui]
                 if tagged_invalid or start_time is None or end_time is None or start_time < 0 or end_time < start_time or end_time > duration:
                     invalid = True
                     break
@@ -167,54 +145,36 @@ def map_sentence_bounds(
                     break
                 bounds.append((start_time, end_time))
                 previous_start, previous_end = start_time, end_time
-            if invalid or not bounds:
-                record["reason"] = "invalid_native_timing"
-                continue
-            first_start, first_end = bounds[0]
-            last_start, last_end = bounds[-1]
-            if first_end <= first_start or last_end <= last_start:
-                record["reason"] = "invalid_boundary_unit"
-                continue
-            start_sample = round(first_start * sample_rate)
-            end_sample = round(last_end * sample_rate)
-            start_ms = round(first_start * 1000)
-            end_ms = round(last_end * 1000)
-            if not (0 <= start_sample < end_sample <= clip_frames and start_ms < end_ms):
-                record["reason"] = "rounded_invalid_bounds"
-                continue
-            record.update(status="candidate", start_sample=start_sample, end_sample=end_sample, start_ms=start_ms, end_ms=end_ms)
-
-        for index in range(1, len(sentence_records)):
-            left = sentence_records[index - 1]
-            right = sentence_records[index]
-            if left["status"] == "candidate" and right["status"] == "candidate":
-                left_end = normalized[left["unit_indices"][-1]][2]
-                right_start = normalized[right["unit_indices"][0]][1]
-                if right_start is not None and left_end is not None and right_start < left_end:
-                    for record in (left, right):
-                        record.update(status="unavailable", reason="overlapping_sentence_bounds", start_sample=None, end_sample=None, start_ms=None, end_ms=None)
-    elif coverage == "mismatch":
+            if record["reason"] is None:
+                if invalid or not bounds:
+                    record["reason"] = "invalid_native_timing"
+                else:
+                    first_start, first_end = bounds[0]
+                    last_start, last_end = bounds[-1]
+                    if first_end <= first_start or last_end <= last_start:
+                        record["reason"] = "invalid_boundary_unit"
+                    else:
+                        start_sample = round(first_start * sample_rate)
+                        end_sample = round(last_end * sample_rate)
+                        start_ms = round(first_start * 1000)
+                        end_ms = round(last_end * 1000)
+                        if not (0 <= start_sample < end_sample <= clip_frames and start_ms < end_ms):
+                            record["reason"] = "rounded_invalid_bounds"
+                        else:
+                            record.update(status="candidate", start_sample=start_sample, end_sample=end_sample, start_ms=start_ms, end_ms=end_ms)
+            # Use original finite native edge values even when sentence-internal validation failed.
+            left_edge = normalized[indices[-1]][2] if indices else None
+            right_edge = normalized[sentence_records[index + 1]["unit_indices"][0]][1] if index + 1 < len(sentence_records) and sentence_records[index + 1]["unit_indices"] else None
+            edge_pairs.append((left_edge, right_edge))
+        overlap_implicated: set[int] = set()
+        for index, (left_end, right_start) in enumerate(edge_pairs):
+            if left_end is not None and right_start is not None and math.isfinite(left_end) and math.isfinite(right_start) and right_start < left_end:
+                overlap_implicated.update((index, index + 1))
+        for index in overlap_implicated:
+            record = sentence_records[index]
+            record.update(status="unavailable", reason="overlapping_sentence_bounds", start_sample=None, end_sample=None, start_ms=None, end_ms=None)
+    else:
         for index, (span_text, text_start, text_end) in enumerate(spans):
-            sentence_records.append({
-                "sentence_id": f"sentence-{index + 1}", "text": span_text,
-                "text_start": text_start, "text_end": text_end,
-                "status": "unavailable", "reason": "lexical_mismatch",
-                "start_sample": None, "end_sample": None, "start_ms": None, "end_ms": None,
-                "unit_indices": [], "zero_interval_count": 0,
-            })
+            sentence_records.append({"sentence_id": f"sentence-{index + 1}", "text": span_text, "text_start": text_start, "text_end": text_end, "status": "unavailable", "reason": "lexical_mismatch", "start_sample": None, "end_sample": None, "start_ms": None, "end_ms": None, "unit_indices": [], "zero_interval_count": 0})
 
-    return {
-        "schema_version": "sentence-0.1",
-        "transcript": transcript,
-        "sample_rate": sample_rate,
-        "clip_frames": clip_frames,
-        "coordinate": "original_clip_samples_and_python_codepoints",
-        "source": source,
-        "segmentation": {
-            "status": "punctuation_candidates" if len(spans) > 1 else "single_span_unverified",
-            "method": "transcript_terminal_punctuation",
-        },
-        "coverage": coverage,
-        "sentences": sentence_records,
-        "native_units": native,
-    }
+    return {"schema_version": "sentence-0.1", "transcript": transcript, "sample_rate": sample_rate, "clip_frames": clip_frames, "coordinate": "original_clip_samples_and_python_codepoints", "source": source, "segmentation": {"status": "punctuation_candidates" if len(spans) > 1 else "single_span_unverified", "method": "transcript_terminal_punctuation"}, "coverage": coverage, "sentences": sentence_records, "native_units": native}
