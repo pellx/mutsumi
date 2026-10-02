@@ -107,7 +107,7 @@ def propose_pause_sentences(
         right = complete_lexical[len(left):]
         matches = [
             offset
-            for offset in range(len(transcript) + 1)
+            for offset in range(1, len(transcript))
             if unicodedata.normalize("NFC", transcript[:offset])
             and (offset == 0 or not unicodedata.category(transcript[offset]).startswith("M"))
             and _lexical(transcript[:offset]) == left
