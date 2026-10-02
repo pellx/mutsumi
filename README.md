@@ -74,3 +74,17 @@ node tools/harness/run-luna.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=
 ```
 
 默认停顿阈值600ms可调100..3000ms；默认局部推理窗余量150ms不是句界时间。JSON文本只接受精确的 {"transcript":"原文"} 对象，也可用纯UTF8文本。已有输出不覆盖；ok表示所有句界为模型候选，partial保留不可定位句及诊断，不伪造时间。当前自主重跑fumo得到7句、衣柜得到3句且运行后才与用户标准比较一致；23项独立结构检查和真实离线推理通过，详见[验收](docs/reviews/M02-automatic-sentence-worker.md)。该独立worker尚未连接完整原音分析/ASR生产入口，逐字起点和输入情绪仍待接入。
+
+## 每句字／词起点与输入情绪（2026-10-03，D42）
+
+在自动分句输出之后运行 [character_starts.py](tools/local-aligner/character_starts.py)，对每句实际采样片段重新推理。只定位模型原生起点；相邻不同起点形成占用区间，末块到句尾，包含停顿。重合起点合并并标明不确定，整词不强行拆字，原始诊断保留。例如：
+
+```powershell
+.runtime/aligner-venv/Scripts/python.exe tools/local-aligner/character_starts.py --audio data/acceptance/automatic-sentences-001/inputs/audio-2.wav --sentences-file data/acceptance/automatic-sentences-001/output-2/sentences.json --output-dir data/acceptance/my-character-starts-001 --threads 6
+```
+
+输出目录须新建或为空，character-starts.json 不覆盖旧结果。相对路径从项目根解析，模型固定本地离线CPU；status partial 保留起点重合/整词/失败，不能当逐字精度全部通过。
+
+随后 [OhMyGptEmotion](apps/server/src/providers/ohmygpt/ohmygpt-emotion.ts) 用真实人声音频和不可修改的句子投影分析情绪，固定已有 OhMyGPT Gemini 路线，每段一次请求，返回按句候选含unknown，不修改文字/时间、不编造评分。当前只接受完整可用句界且省略units的EmotionInput；占用区间不冒充旧发音首尾。模块已真实调用通过，完整生产CLI接线尚未完成。
+
+[本轮验收](docs/reviews/M02-character-starts-emotion.md)：字头24项独立检查、情绪36项、完整构建与287项回归通过；两段真人10句得到154原生单位/149占用区间，两次情绪HTTP200得到10候选。字头精度、原话和情绪仍待真人核对。私有试听页 http://127.0.0.1:8770/（服务运行时），每句播放和字块试听；原分句8769、原音分离对照8768保留。应用代码仍仅ChatGPT认证gpt-6-luna CLI编写，逐文件本地提交，无push。
