@@ -21,10 +21,11 @@
 
 优先评估固定版本 Demucs 的 htdemucs 单模型 CPU 分离，避免默认占满本机 RTX2060 的6GiB显存。首版只试原录音约5.2秒；隔离依赖，不升级已验收的 Qwen 环境，不改系统页面文件/代理。CPU 推理成功不等于声学质量合格，GPU另行实测。官方文档明确 two-stems 仍执行完整分离，不能当作减少模型显存；人声分离不保证去混响。实现前固定实际包版本、官方权重来源及哈希，核查载入方式；离线运行不得隐式下载模型。
 
-参考：[Demucs 官方 README](https://github.com/facebookresearch/demucs/blob/main/README.md)、[PyPI 包信息](https://pypi.org/project/demucs/)、[Audio Separator 官方 README](https://github.com/nomadkaraoke/python-audio-separator/blob/main/README.md)。Audio Separator 的多个模型是候选替换实现，不据仓库 SDR 宣传声称这段录音必然更好。当前尚未安装/验收分离模型。
+参考：[Demucs 官方 README](https://github.com/facebookresearch/demucs/blob/main/README.md)、[PyPI 包信息](https://pypi.org/project/demucs/)、[Audio Separator 官方 README](https://github.com/nomadkaraoke/python-audio-separator/blob/main/README.md)。Audio Separator 的多个模型是候选替换实现，不据仓库 SDR 宣传声称这段录音必然更好。已隔离安装 Demucs4.1.0，复用只读 Torch2.10.0+cpu 依赖；已固定官方 HTDemucs safetensors 修订与哈希并完成真人录音 CPU 分离试跑。人声听感质量尚待用户验收，试跑不表示分离 worker/句子定位/完整 CLI 已接入。
 
 ## 实施与真人验收
 
 先交付独立 onset 结果映射器（不加载模型、不读取私人音频），用合成 JSON 检查重复点/零结束点/乱序/裁剪偏移/粒度不足；再交付本地分离 worker，真实试听原音、vocals 和 accompaniment；再实现句子定位及裁剪推理，最后接入情绪/融合/CLI。每个文件分别由 Luna 写入并立即单独提交。结构测试不等于真人验收。
 
 已有“序列”原混音的17字对齐中6个零区间仍是旧版失败证据，不因新契约自动改称完整验收成功。新的干声转写/句子范围/字起点与原输出分开存放。验收记录必须区分自动句子范围、人工参考、独立字符起点与仅供审听的窗口。
+
