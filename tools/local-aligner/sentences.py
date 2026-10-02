@@ -51,15 +51,19 @@ def read_text(path: Path) -> str:
     return raw
 
 
-def invoke(aligner, samples, text, source, frame_count):
+def invoke(aligner, samples, text, source, frame_count, *, single_part=False):
     started = time.perf_counter()
     result = aligner.align(audio=(samples, RATE), text=text, language="Chinese")
     elapsed = round((time.perf_counter() - started) * 1000)
     items = result[0].items
     native = raw_units(items)
     try:
-        mapped = map_sentence_bounds(native, transcript=text, sample_rate=RATE, clip_frames=frame_count, source=SOURCE)
-    except Exception as exc:
+        if single_part:
+            mapped = map_sentence_bounds(native, transcript=text, sample_rate=RATE, clip_frames=frame_count,
+                source=SOURCE, sentence_texts=[text], segmentation_source="crop_local_single_part")
+        else:
+            mapped = map_sentence_bounds(native, transcript=text, sample_rate=RATE, clip_frames=frame_count, source=SOURCE)
+    except Exception:
         return None, native, elapsed, "mapping_failed"
     return mapped, native, elapsed, None
 
@@ -123,13 +127,20 @@ def run(args):
     selected["segmentation"]["gap_evidence"] = gaps
 
     refinements = []
+    timing_reasons = {"invalid_boundary_unit", "invalid_native_timing", "rounded_invalid_bounds", "overlapping_sentence_bounds"}
     for index, record in enumerate(selected["sentences"]):
         if record["status"] == "candidate":
             continue
+        if record.get("reason") not in timing_reasons:
+            refinements.append({"sentence_id": record["sentence_id"], "status": "unavailable", "reason": "ineligible_non_timing_rejection",
+                "coarse_rejection": record.get("reason")})
+            continue
         owned = record["unit_indices"]
         starts = [native[i]["start_time"] for i in owned]
-        if not owned or any(type(x) not in (int, float) or not math.isfinite(x) or x < 0 or x > duration for x in starts):
-            refinements.append({"sentence_id": record["sentence_id"], "status": "unavailable", "reason": "ineligible_edge_starts"})
+        if (not owned or any(type(x) not in (int, float) or not math.isfinite(x) or x < 0 or x > duration for x in starts)
+                or any(right < left for left, right in zip(starts, starts[1:]))):
+            refinements.append({"sentence_id": record["sentence_id"], "status": "unavailable", "reason": "ineligible_edge_starts",
+                "coarse_rejection": record.get("reason"), "original_reason": record.get("reason")})
             continue
         next_start = None
         if index + 1 < len(selected["sentences"]):
@@ -143,15 +154,17 @@ def run(args):
         begin = max(0, min(frames, begin))
         end = max(0, min(frames, end))
         if not 0 <= begin < end <= frames:
-            refinements.append({"sentence_id": record["sentence_id"], "status": "unavailable", "reason": "empty_inference_window"})
+            refinements.append({"sentence_id": record["sentence_id"], "status": "unavailable", "reason": "empty_inference_window",
+                "coarse_rejection": record.get("reason"), "original_reason": record.get("reason")})
             continue
         try:
             with contextlib.redirect_stdout(sys.stderr):
-                crop_map, crop_native, elapsed, issue = invoke(aligner, samples[begin:end], record["text"], SOURCE, end - begin)
+                crop_map, crop_native, elapsed, issue = invoke(aligner, samples[begin:end], record["text"], SOURCE, end - begin, single_part=True)
             crop_record = crop_map["sentences"][0] if crop_map and len(crop_map["sentences"]) == 1 and crop_map["coverage"] == "exact" else None
             refinements.append({"sentence_id": record["sentence_id"], "status": "attempted", "window_start_sample": begin,
                 "window_end_sample": end, "window_clamped": begin != round(starts[0] * RATE) - args.crop_margin_ms * RATE // 1000,
-                "crop_native_units": crop_native, "elapsed_ms": elapsed, "coarse_rejection": record["reason"]})
+                "crop_native_units": crop_native, "crop_map": crop_map, "elapsed_ms": elapsed, "coarse_rejection": record["reason"],
+                "original_reason": record["reason"]})
             if crop_record and crop_record["status"] == "candidate":
                 left = begin + crop_record["start_sample"]
                 right = begin + crop_record["end_sample"]
@@ -159,7 +172,8 @@ def run(args):
                     record.update(status="candidate", reason=None, start_sample=left, end_sample=right,
                         start_ms=round(left * 1000 / RATE), end_ms=round(right * 1000 / RATE))
         except Exception:
-            refinements.append({"sentence_id": record["sentence_id"], "status": "unavailable", "reason": "inference_failed"})
+            refinements.append({"sentence_id": record["sentence_id"], "status": "unavailable", "reason": "inference_failed",
+                "coarse_rejection": record.get("reason"), "original_reason": record.get("reason")})
     overlaps = set()
     records = selected["sentences"]
     for i in range(len(records) - 1):
@@ -180,7 +194,9 @@ def run(args):
         for record in records:
             if record["status"] == "candidate":
                 name = record["sentence_id"] + ".wav"
-                sf.write(str(output_dir / name), samples[record["start_sample"]:record["end_sample"]], RATE, subtype="FLOAT", format="WAV")
+                with (output_dir / name).open("xb") as wav_stream:
+                    sf.write(wav_stream, samples[record["start_sample"]:record["end_sample"]], RATE,
+                        subtype="FLOAT", format="WAV")
                 record["audio_file"] = name
         target = output_dir / "sentences.json"
         with target.open("x", encoding="utf-8", newline="\n") as stream:
