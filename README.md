@@ -7,7 +7,7 @@
 - 已有供应商无关的标注契约、严格校验、原始音频存储、FFmpeg 接入、会话存储与上下文/表达计划基础模块。
 - 已有阿里云上传/ASR、OhMyGPT 音频分析，以及分离后的 Gemini 转写与 Qwen-Audio 时间适配器。Qwen-Audio 仍会改写文字，真实录音对照被拒绝，不能当作准确的强制对齐。
 - 已选本地 `Qwen3-ForcedAligner-0.6B`，Luna 已交付 [本地 worker](tools/local-aligner/align.py)。新设备 CPU FP32 离线真人录音推理通过；已知原生零时长录音被明确拒绝并保留全部诊断。GPU 推理、旧录音/Gemini 对照及声学边界听审仍未验收，见 [本机验收记录](docs/reviews/M02-local-forced-aligner-new-device.md)。
-- 独立情绪阶段、分离流程的 CLI 入口仍待实现。对话/TTS 云模型尚未选定；现有开发 mock 不能代表完整真实语音能力。
+- 独立情绪阶段、分离流程的 CLI 入口仍待实现。回复文本已选 Gemini、表达已选 Jev，真实适配与完整流程尚待接入。新增本地 Qwen3-TTS 1.7B CustomVoice CPU 离线试部署和独立 worker，实际中文音频已生成；音质/情绪待试听，CPU 耗时较长，尚未接入完整回复链路。现有开发 mock 不能代表完整真实语音能力。
 - TypeScript 构建和 287 项现有测试通过；本机直接运行对应的 build/test 命令验证。结构测试通过不等于识别、切片和情绪质量通过。
 
 换设备请先读 [交接说明](docs/device-handoff.md)，然后读 [已确认决策](docs/decisions.md)。历史任务和评审记录中的旧方案不覆盖最新决策。
@@ -49,3 +49,16 @@ node tools/harness/run-luna.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=
 每次实现只修改一个指定文件，由监督者立即单独提交后继续。当前只提交本地仓库，迁移设备时再同步 GitHub（D29）。`.env`、私人录音/会话与原始响应 `data/`、编码记录/虚拟环境 `.runtime/`、依赖与构建产物均不提交。
 
 架构见 [docs/architecture.md](docs/architecture.md)，接口见 [docs/contracts.md](docs/contracts.md)，流程见 [voice-system-flow.md](voice-system-flow.md)。
+
+
+## 本地 TTS 试听部署
+
+当前采用官方 Qwen3-TTS-12Hz-1.7B-CustomVoice、Serena 中文预设女声，CPU FP32 离线生成完整 WAV。验收和恢复依赖见 [本机 TTS 记录](docs/reviews/M04-local-tts.md)；应用代码由 gpt-6-luna CLI 编写。36 项结构/异常检查与真实合成通过，发音完整性、音色和情绪仍待真人试听。生成音频属于 TTS 输出，不作为真人输入录音验收。
+
+请求文件是 UTF-8 JSON，例如 {"text":"你好，我在这里。","speaker":"Serena","instruct":"温柔平静地说话"}。文本最多200字，指令最多240字，当前固定中文。下方本机已有请求文件可重用，输出目录每次选新的或空的；worker 不覆盖旧输出：
+
+```powershell
+.runtime/tts-venv/Scripts/python.exe tools/local-tts/synthesize.py --request-file data/acceptance/local-tts/gentle-request.json --output-dir data/acceptance/local-tts/my-tts-run --threads 6 --max-new-tokens 256
+```
+
+输出 output.wav 与 synthesis.json；时长由真实帧数计算，逐字时间 unavailable，情绪指令效果和是否读全 not_verified，不进行补时或声称精确语速/停顿/强度。现有约4..6秒试听音频耗时42..58秒生成，CPU 路线尚不适合流畅对话。GPU 加速及 Gemini → Jev → TTS 接线另行实现；当前磁盘余量不足以再安装完整 CUDA 依赖。
