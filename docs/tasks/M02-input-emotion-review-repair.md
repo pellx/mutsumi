@@ -1,0 +1,11 @@
+# M02 emotion independent review repair
+
+ONE file apps/server/src/providers/ohmygpt/ohmygpt-emotion.ts. Read only target, application/input-stage-ports.ts, domain/annotation.ts. Authenticated gpt-6-luna; single physical write then read-only syntax via absolute bundled Node stripTypeScriptTypes from original task. No build/model/live call/secrets/data/logs. Reliable PowerShell single quoted here string. Stop after write/check.
+
+Supervisor full tsc failed TS2339 at lines271/330: snapshotAlignment returns broad EmotionInput so .timing could unavailable. Define private validated immutable alignment/segment types retaining Extract<Timing,{status:'available'}> and return narrowed type, including frozen available timing; do not cast broad unchecked values or weaken public interfaces. Validation requires available before snapshot as already implemented. Preserve transport/observations schema.
+
+Review strict input protection: plainArray must reject symbol keys/custom props/holes/accessors and enforce own index descriptors+length as accepted whole-audio helper did. snapshotAudio must plainRecord asset before validateAudioAsset so getters/symbols are rejected without reading them. Validate asset exactown keys six from AudioAsset? Correct AudioAsset keys are asset_id,media_type,duration_ms,sample_rate_hz,channels (five). Retain validator. Alignment snapshot text total bounded by transcript; each segment should <=6000chars to prevent oversize temporary concatenation. getters on options signal also reject safely using plainRecord; avoid untrusted accessor direct read. Catch malformed/proxy snapshot validation and classify as owned invalid_input without foreign error text; no audio read/fetch on bad input. Preserve current plain data callers.
+
+Prompt explicitly label source as isolated_vocals supplied by caller of this dedicated input stage; may retain background singers or separation artifacts. Backgroundmusic and narrative content must not decide speaker emotion; unknown is valid. Do not add new emotions/confidence/timing or onset occupancy as phonetic intervals.
+
+Output safe provider errors/one request/deadlines same. Supervisor will rerun29 + new getter/array/mutation tests and full TypeScript/regression. No claim full build from syntax check.
