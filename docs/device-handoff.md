@@ -126,3 +126,15 @@ Owner says first separation seems fairly good and will supply more real recordin
 D36 adds whole original-audio analysis BEFORE isolated-speech analysis, retaining overall scene/features/music/environment/effects and non-lexical human sounds/unknown. Use original waveform evidence, not accompaniment alone. Both whole context and speech text/available timing/voice cues go to bounded context for Gemini with stable owner persona/rules/selected memory; Jev remains reply-expression decision only. First whole-stage candidate reuses already selected Gemini audio route; no cloud calls this turn. New whole-specific output/context merge/sequence/actual reply remain unimplemented. Missing event times/confidence stay unknown, conflicting original/vocal transcriptions remain independent, no guesses promoted to persona rules or durable facts.
 
 Updated docs/input-vocals-onsets-design.md and D36; current target diagram appended to voice-system-flow.md with explicit not-implemented label, historical diagram retained. Initial automatic-review rejection of total-diagram rewrite was resolved by readonly verification of supervisor design authority and the actual AGENTS prohibition against changing architecture to make implementation appear compliant; approved append completed. No application code, criteria or global settings modified. All files individually committed locally, no push.
+
+### 原音整体分析与两个新样例（2026-10-03，D36/D37）
+
+用户明确允许提供录音上云。Luna 已新增 application/whole-audio-ports.ts 与 providers/ohmygpt/ohmygpt-whole-audio.ts，逐文件提交合入main；监督主仓库42项契约/26项传输检查、TypeScript构建、287项既有回归均通过。[模块验收](reviews/M02-whole-audio.md)。固定OhMyGPT gemini-3.8-flash；整体结果original_mix，场景/事件均为候选，无事件时间或评分。完整双结果上下文、生产顺序编排、人声观察/句子定位/逐字起点推理仍未接入。不要把私有QA联合结果当生产上下文实现。
+
+两个新真人样例fumo与衣柜已离线CPU HTDemucs分离：实际26.749s/9.900s，推理17.261s/7.670s，未按MP3头部估计帧数补时。原混音、人声、伴奏、16k人声分析及manifest在ignored data/acceptance/owner-fumo、owner-wardrobe 的 separation-001。监督先做了本地分离，再执行原音整体分析与已有分离轨转写；尚未验收完整“整体分析后重新分离”的生产链路。[真人样例记录](reviews/M02-owner-two-audio-pilot.md)。
+
+第一次四次云端尝试连接超时无HTTP响应，记录run001；诊断并仅在QA子进程启用既有.env OHMYGPT_PROXY_URL后，明确有界第二轮四次HTTP200、全部结果严格映射通过，无自动重试/替代模型。private whole-analysis-002、vocals-transcription-002保留原始响应/usage/结果；combined-context-qa-002.json保留双来源、冲突与能力缺口。不能确认第一次失败的服务端接收/计费。私有analysis-plan已更新D37授权及实际状态。原始音频不发送给编码模型。没有付费回复/Jev调用、系统代理或模型部署变更。
+
+质量仍待真人核对：衣柜整体模型声称器乐，与用户“含人声BGM”标签不一致；fumo整体室内线索与人声阶段户外线索冲突。人声分离不保证前景说话者与背景歌手隔离。转写未获得human-reference，不自动定稿，不将场景/性别/地点猜测写入记忆，不造时间戳。
+
+私人试听页 http://127.0.0.1:8768/（若仍运行），QA服务 .runtime/qa/owner-two-listening-server.mjs；六条音轨Edge元数据检查通过且截图已检查。静态报告 data/acceptance/owner-two-listening.html。换设备复制所需ignored私有材料后重开QA服务，不能期待本机进程迁移。Luna三次编码报告在.runtime/harness-runs/whole-audio-worker/harness-runs，经哈希备份校验后本任务工作树已移除；Jev未验收工作树仍保留。所有提交仅本地，无push。下一步实现双来源InputContextBundle/上下文编排，继续通过ChatGPT认证gpt-6-luna CLI逐文件实现；听审确认后推进句子/字起点和声学情绪。TTS仍按D35延期。
