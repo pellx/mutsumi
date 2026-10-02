@@ -1,0 +1,7 @@
+# M02 automatic sentence lexical ownership repair
+
+ONLY read/write tools/local-aligner/sentences.py through gpt-6-luna ChatGPT CLI. ONE physical write after ast.parse, then readonlysyntax stop for supervisor commit. No otherreads/private data/env/network/Git/testsfilewrites.
+
+Independent mock test exposed crossing-word refinement despite reason filtering: sentence_result maps crossing word to BOTH sentences, but its reason may be overwritten by overlapping_sentence_bounds. Reason alone cannot establish complete lexical ownership. Before refinement, count occurrences of each native unit index across selected.sentences unit_indices and identify shared unit indexes. ANY record containing a shared native index is ineligible for refinement irrespective of reason; retain unavailable bounds/reason and add refinementdiagnostic reason ineligible_shared_native_units (original/coarse reason retained). If a shared record somehow candidate, null its bounds and mark unavailable native_unit_crosses_sentence_boundary. Never infer a split from same native word twice. Keep remaining generic refinement/output logic unchanged. Implement small checked-anchor transformation; no broadrewrite. No references/case-specific timestamps/counttargets.
+
+UTF8 OutputEncoding and absolute Python C:/Users/anpel/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe -X utf8. Check eachanchoronce before draft, ast.parse before singlewrite, after readonlysyntax.
