@@ -1,0 +1,28 @@
+# M02 local sentence boundary mapper and two owner pilots (2026-10-03)
+
+D38 owner accepted vocal separation listening for fumo and wardrobe and instructed proceeding to sentences. Implementation is ChatGPT-authenticated gpt-6-luna CLI. Main source commits eac5b5b then09ea51d each contain only tools/local-aligner/sentence_result.py, immediately committed after each physical write. Initial independent failures were repaired before acceptance, never disguised by changing application criteria.
+
+## Implementation and independent structural acceptance
+
+Pure standard-library map_sentence_bounds preserves exact transcript/spans/codepoint offsets and separate native diagnostics. Proposes text sentences from terminal punctuation, not commas or whitespace. NFC lexical coverage must match native units exactly. Uses first/last native model edges to derive sentence sample/time candidates; those are model estimates, not manually measured true boundaries. Invalid edge/inside times, reversed sequences, crossing multi-character native units and adjacent overlap remain unavailable; no splitting native words, padding, interpolation, invented timings or emotion. Zero native intervals inside a valid sentence remain counted; zero boundary units cannot yield a valid sentence end. No-punctuation input is explicitly single_span_unverified, not automatically semantically segmented. Old complete-interval align.py validation remains strict and unchanged.
+
+Supervisor .runtime/qa/sentence-result-checks.py against main:35/35 passed. Includes lossless leading/trailing punctuation and whitespace, NFC/mismatch, word crossing3sentences, chained overlaps, invalid internal timing, zero edge/interior, invalid numeric diagnostics, rounding collapse, cloning, strict unit keys and bool rejection. A crossing native unit produces overlapping envelopes as well; test permits either real unavailable diagnosis with every affected index preserved, not an arbitrary valid split. ast.parse passed. Existing TypeScript tests were not rerun for this isolated standard-library Python change; previous287pass result belongs to earlier accepted change.
+
+Luna first two no-write attempts failed due interpreter invocation then UTF8 pipe decoding. Second complete draft was recovered unchanged from the CLI command record via shell-argument decoding, independently ast-parsed, deployed byte-for-byte and hash compared; supervisor did not author/alter its application logic. Immediate initial commit preserved that draft. Independent checks found dropped whitespace/punctuation and crossing/overlap issues; third Luna invocation applied one-file repair using explicit UTF8 and passed readonly syntax checks. Full reports and recovered draft are preserved in ignored QA/harness artifacts. An earlier mistakenly main-root launched run was stopped before any target write, then restarted in the isolated worktree.
+
+## Actual local audio result
+
+Existing accepted local align.py ran CPU FP32 six threads offline on both isolated mono16k human tracks and their unchanged Gemini candidate transcripts. Input transcripts are NOT owner-confirmed references. Model raw diagnostics and stdout/stderr remain private data/acceptance/owner-{fumo,wardrobe}/sentence-pilot-001. Whole command wall times: fumo70.3455113s, wardrobe20.0524127s. Both original strict full-word interval requests returned invalid_alignment; this is retained and is not reclassified as complete word alignment success.
+
+Sentence mapper independently consumes native invalid_units diagnostics:
+
+- fumo: native lexical coverage exact,114native units,4zero intervals. Seven punctuation-defined sentence envelopes are candidate; all seven have valid first/last edges. Ranges ms:0..1920,2560..5440,5920..7280,7680..9200,9280..11360,12000..17520,18000..26320. No punctuation has assigned time. Seven mono16k WAV crops use exact start/end sample indexes returned by the mapper, without extra silence or moved edges.
+- wardrobe: one unpunctuated span, no semantic sentence claim; final native unit has equal9.84s start/end. Bounds unavailable invalid_boundary_unit; no fabricated sentence crop. Need a separate lexical-preserving semantic boundary proposal stage and an independently valid end candidate before declaring this case done.
+
+Private sentences.json retains raw units, status/reasons, codepoint offsets, native-derived samples and unconfirmed transcript. .runtime/qa/sentence-pilot-map.py is supervisor QA orchestration only; not production app wiring or a new aligner worker.
+
+## Owner listening entry point and remaining work
+
+Private QA http://127.0.0.1:8769/ serves two full vocal tracks + sevenfumo crops and exact candidate text/bounds. .runtime/qa/sentence-listening-server.mjs, static report data/acceptance/sentence-pilot-001-listening.html. Edge loaded9/9 metadata; screenshot inspected, UI labels model candidates/unavailable and does not imply human timing acceptance. Evidence .runtime/qa/sentence-listening-page-check.json and sentence-listening-page.png. No auditory boundary reference/accuracy score yet; check each clip for clipped first/last sound and text errors.
+
+Only punctuation-driven sentence mapping accepted structurally. Semantic punctuation-free sentences, crop-local character inference, input emotion, combined context and production CLI remain outstanding. No new cloud calls completed in this turn. New seven-clip archive was locally intake-checked only; automatic approval review rejected the proposed cloud pilot before execution, owner then prioritized local sentences. No alternate path bypassed rejection. TTS remains deferred. All commits local, no push.
