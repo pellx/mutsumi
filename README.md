@@ -1,42 +1,41 @@
 # mutsumi
 
-情绪语音助手原型，计划采用手动录音 → 转写与声音标注 → 人格和记忆参与对话 → 表达规划 → TTS → 播放完整回复。技术栈为 TypeScript、NestJS 和浏览器 UI。
+情绪语音助手原型。当前优先完成 CLI 输入分析：音频 → Gemini 提取文字与背景声音 → 本地强制对齐 → Gemini 判断情绪。之后再接人格、记忆、对话和 TTS。已有 NestJS 服务和浏览器原型保留，前端后续再完善。
 
-## 当前已实现
+## 当前状态（2026-10-02）
 
-- 与框架和供应商无关的语音标注数据类型、校验、JSON 解析及序列化。
-- 显式记录时间是否可用、字词起止时间、片段情绪、来源和分数含义；不伪造缺失数据。
-- 转写与发布接口、阿里云结果映射、临时上传、异步任务提交/轮询/结果下载适配器。
-- Qwen 文字时间缺失或零时长时，条件调用一次 Paraformer 校准；保持原始文字和句级情绪，标明时间来源，不拆分或平均供应商单位。
-- 合成数据验收测试及严格类型检查，覆盖时间边界、取消、超时、响应大小和错误信息隔离。
-- 通过 Codex CLI 调用 Qwen3.8-Flash 的受限编码 harness；Qwen 失败时使用用户授权的官方 DeepSeek 后备。
+- 已有供应商无关的标注契约、严格校验、原始音频存储、FFmpeg 接入、会话存储与上下文/表达计划基础模块。
+- 已有阿里云上传/ASR、OhMyGPT 音频分析，以及分离后的 Gemini 转写与 Qwen-Audio 时间适配器。Qwen-Audio 仍会改写文字，真实录音对照被拒绝，不能当作准确的强制对齐。
+- 已选本地 `Qwen3-ForcedAligner-0.6B`。本机完成 CPU/DirectML 独立环境安装和官方权重下载；RX6950XT 枚举成功，但加载报 Windows 页面文件不足，尚未完成真实推理验收。本地 worker 任务已写，编码在换设备前停止，目标文件尚未交付。
+- 独立情绪阶段、分离流程的 CLI 入口仍待实现。对话/TTS 云模型尚未选定；现有开发 mock 不能代表完整真实语音能力。
+- 当前 `npm run check`：TypeScript 构建成功，287 项测试通过。结构测试通过不等于识别、切片和情绪质量通过。
 
-目前交付到语音标注适配器，没有可启动的 NestJS 服务、录音界面或完整语音对话流程。已选 qwen3-asr-flash-filetrans 异步转写、文字时间戳和句级情绪，先用百炼临时上传，后续替换成自己的 OSS。条件校准已经用 6.268 秒的本地合成中文样本完成真实验证：Qwen、Paraformer 各提交一次，原始两个零时长字修复为 190ms 和 240ms，最终 19 个单位均有正时长；文字、情绪标签和原始情绪时间保持一致。默认检查的 230 项测试通过。此轮本地修复等待所有者体验验收，尚未推送本模块；真实人声的情绪识别质量仍需单独验收。详情见 `docs/reviews/M02-conditional-calibration-acceptance.md`。
+换设备请先读 [交接说明](docs/device-handoff.md)，然后读 [已确认决策](docs/decisions.md)。历史任务和评审记录中的旧方案不覆盖最新决策。
 
-## 本地检查
+## 本地准备与检查
 
-需要 Node.js 24 或更新版本及 npm。
+需要 Node.js24 或更新版本、npm；处理音频还需要 FFmpeg/FFprobe。进入项目根目录：
 
 ```sh
 npm ci --ignore-scripts
 npm run check
 ```
 
-检查不需要云端密钥，不调用付费服务。数据模块位于 `apps/server/src/domain/annotation.ts`，验收测试位于 `tests/acceptance/annotation.test.mjs`。
+将 `.env.example` 复制为 `.env`，在新设备自行配置对应服务的密钥和路径。检查命令不调用云端，不需要 API Key。
 
-## 编码委派
+已有 HTTP 原型可以通过 `npm start` 启动，开发演示通过 `npm run start:mock` 启动。开发模式只演示结构，不证明真实供应商或 TTS 已接通；它们不是待实现的分离式 CLI 输入流程。
 
-业务代码优先由 Qwen 编写，连接失败时按用户授权调用官方 DeepSeek。Codex 负责接口、任务范围、审查和独立验收。编码模型和运行时 ASR、对话、TTS 模型分别选择。
+## 编码与数据
 
-将 `.env.example` 的配置复制到本地 `.env`，填入 `DASHSCOPE_API_KEY`。需要安装 Codex CLI。以下 readiness 检查不证明联网成功：
+后续应用代码由 ChatGPT 认证的 Codex CLI `gpt-6-luna` 编写；监督 Codex 负责架构、任务边界、逐文件提交和独立验收。历史 Qwen/DeepSeek 编码入口保留，已不再是新任务的默认选择。编码模型与运行时语音模型分别选择。
 
 ```sh
-npm run harness:check
-node tools/harness/run-qwen.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=600000
-# Qwen 失败时，使用独立的 DEEPSEEK_API_KEY 和已释放任务：
-node tools/harness/run-deepseek.mjs docs/tasks/TASK.md
+codex login
+node tools/harness/run-luna.mjs --check
+# 仅对已批准任务执行：
+node tools/harness/run-luna.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=600000
 ```
 
-最后一条会调用付费编码模型，只运行已经释放的任务。每次委派只修改一个指定文件，监督者立即单独提交再验收。`.env`、私有录音 `data/`、编码报告 `.runtime/` 和依赖目录均忽略，不提交。
+每次实现只修改一个指定文件，由监督者立即单独提交后继续。`.env`、私人录音/会话与原始响应 `data/`、编码记录/虚拟环境 `.runtime/`、依赖与构建产物均不提交。
 
-架构见 `docs/architecture.md`，已确认决策见 `docs/decisions.md`，接口见 `docs/contracts.md`，流程图见 `voice-system-flow.md`。规划中的模块不是已实现的能力。
+架构见 [docs/architecture.md](docs/architecture.md)，接口见 [docs/contracts.md](docs/contracts.md)，流程见 [voice-system-flow.md](voice-system-flow.md)。
