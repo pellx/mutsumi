@@ -69,15 +69,16 @@ def load_audio(path: Path):
             fail_input()
         info = sf.info(str(path))
         if (info.channels not in (1, 2) or not 8000 <= info.samplerate <= 192000 or
-                info.frames <= 0 or info.frames / info.samplerate > 120):
+                info.frames <= 0):
             fail_input()
-        samples, rate = sf.read(str(path), dtype="float32", always_2d=True)
+        samples, rate = sf.read(str(path), frames=info.samplerate * 120 + 1,
+                                dtype="float32", always_2d=True)
     except WorkerError:
         raise
     except Exception as exc:
         raise WorkerError("input_invalid") from exc
-    if (samples.ndim != 2 or samples.shape[0] <= 0 or samples.shape[1] not in (1, 2) or
-            samples.shape[0] != info.frames or int(rate) != info.samplerate or
+    if (samples.ndim != 2 or samples.shape[0] <= 0 or samples.shape[1] != info.channels or
+            int(rate) != info.samplerate or samples.shape[0] > info.samplerate * 120 or
             not np.isfinite(samples).all() or not np.any(samples != 0)):
         fail_input()
     return np.asarray(samples, dtype=np.float32), int(rate), int(samples.shape[0]), int(samples.shape[1])
