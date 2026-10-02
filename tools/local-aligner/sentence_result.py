@@ -65,7 +65,12 @@ def _copy_json(value: Any) -> Any:
     return value
 
 
-def map_sentence_bounds(items: list[dict[str, Any]], *, transcript: str, sample_rate: int, clip_frames: int, source: str) -> dict[str, Any]:
+def map_sentence_bounds(items: list[dict[str, Any]], *, transcript: str, sample_rate: int, clip_frames: int, source: str, sentence_texts: list[str] | None = None, segmentation_source: str | None = None) -> dict[str, Any]:
+    """Map native timing to local sentence candidates.
+
+    External sentence texts only propose lexical boundaries; local native units
+    determine time. Semantic proposals alone never provide timestamps.
+    """
     if not isinstance(items, list) or len(items) > 6000:
         raise ValueError("items must be a list of at most 6000 units")
     if not isinstance(transcript, str) or not 1 <= len(transcript) <= 6000 or not transcript.strip():
@@ -93,7 +98,29 @@ def map_sentence_bounds(items: list[dict[str, Any]], *, transcript: str, sample_
         native.append(_copy_json(item))
         normalized.append((text, start_time, end_time, bad_start or bad_end))
 
-    spans = _split_spans(transcript)
+    if sentence_texts is None:
+        if segmentation_source is not None:
+            raise ValueError("segmentation_source requires sentence_texts")
+        spans = _split_spans(transcript)
+        segmentation = {"status": "punctuation_candidates" if len(spans) > 1 else "single_span_unverified", "method": "transcript_terminal_punctuation"}
+    else:
+        if type(sentence_texts) is not list or not 1 <= len(sentence_texts) <= 128:
+            raise ValueError("sentence_texts must be a list of 1 to 128 texts")
+        if any(type(text) is not str or not text.strip() or not _lexical_key(text) for text in sentence_texts):
+            raise ValueError("sentence_texts must contain nonblank lexical text")
+        if "".join(sentence_texts) != transcript:
+            raise ValueError("sentence_texts must exactly concatenate to transcript")
+        if type(segmentation_source) is not str or not 1 <= len(segmentation_source) <= 128 or not segmentation_source.strip():
+            raise ValueError("segmentation_source must be nonblank text of at most 128 characters")
+        if any(ord(character) <= 31 or 127 <= ord(character) <= 159 for character in segmentation_source):
+            raise ValueError("segmentation_source contains control characters")
+        spans = []
+        cursor = 0
+        for text in sentence_texts:
+            end = cursor + len(text)
+            spans.append((text, cursor, end))
+            cursor = end
+        segmentation = {"status": "semantic_candidates", "method": "exact_external_sentence_texts", "source": segmentation_source}
     if len(spans) > 128:
         raise ValueError("transcript has more than 128 sentence candidates")
     native_key = "".join(_lexical_key(unit[0]) for unit in normalized)
@@ -177,4 +204,4 @@ def map_sentence_bounds(items: list[dict[str, Any]], *, transcript: str, sample_
         for index, (span_text, text_start, text_end) in enumerate(spans):
             sentence_records.append({"sentence_id": f"sentence-{index + 1}", "text": span_text, "text_start": text_start, "text_end": text_end, "status": "unavailable", "reason": "lexical_mismatch", "start_sample": None, "end_sample": None, "start_ms": None, "end_ms": None, "unit_indices": [], "zero_interval_count": 0})
 
-    return {"schema_version": "sentence-0.1", "transcript": transcript, "sample_rate": sample_rate, "clip_frames": clip_frames, "coordinate": "original_clip_samples_and_python_codepoints", "source": source, "segmentation": {"status": "punctuation_candidates" if len(spans) > 1 else "single_span_unverified", "method": "transcript_terminal_punctuation"}, "coverage": coverage, "sentences": sentence_records, "native_units": native}
+    return {"schema_version": "sentence-0.1", "transcript": transcript, "sample_rate": sample_rate, "clip_frames": clip_frames, "coordinate": "original_clip_samples_and_python_codepoints", "source": source, "segmentation": segmentation, "coverage": coverage, "sentences": sentence_records, "native_units": native}
