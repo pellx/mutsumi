@@ -156,3 +156,13 @@ fumo按转写句末标点得到7个模型边界候选，真实采样裁剪7段�
 8769最新运行QA服务 .runtime/qa/sentence-listening-server-003.mjs，静态报告data/acceptance/sentence-pilot-003-listening.html；用户需刷新原页即可见衣柜三句。fumo7句保留；全页12条音轨Edge元数据检查通过。衣柜新句首尾仍待试听，不把分句文本一致当声学正确。不再需要此前计划的Gemini语义提案，本轮无云端调用、无新七段处理、无TTS/Jev变更。下一步推进逐句字符起点推理/输入情绪与双结果上下文；音频阶段应保持原文和局部裁剪时钟证据。
 
 本任务Luna记录已复制到主仓库.runtime/harness-runs/semantic-sentence-worker/harness-runs并逐文件哈希验证，已合入且干净的工作树移除；未验收Jev工作树保留。应用源码仍仅Luna CLI编写，监督QA在忽略目录；本地提交不push。
+
+### 通用自主分句worker，参考只用于事后验收（2026-10-03，D41）
+
+用户澄清标准三句是目标，运行流程不能由人工答案驱动。此前QA虽自动提出parts，句尾仍复用样例专门缓存，已明确不算通用流程。Luna已完成tools/local-aligner/sentences.py：只需音频+转写+通用参数，模型一次加载，全段新推理后自动标点/长停顿分句，对合格无效句子自动从模型首字/下一句首字和150ms窗余量选裁剪窗口并局部新推理，无case/参考/预设数量/缓存输入。原文与诊断保留，无法定位不造时间，输出独占。共享原生词无论拒绝reason都禁止重切。23项结构检查和两个真实独立推理通过，详见[通用worker验收](reviews/M02-automatic-sentence-worker.md)，README有直接CLI命令。
+
+新私人结果data/acceptance/automatic-sentences-001，inputs采用中性名字。主仓库实际程序读取审计禁止参考和旧私人结果，两次运行zero blocked reads；native I/O不声称全拦截，源码/API复查共同确认无参考依赖。事后监督才读用户标准比较。实际fumo7句/25.947s，衣柜3句/23.932s；衣柜第三句自动选择119200..158407sample推理窗，来源是本轮coarseunit和通用margin，没有喂固定时间。逐段实际音频帧数匹配、有限且mono16k；WAV容器字节不同，但全部解码浮点采样与之前片段完全一致。fumo既有听审认可不扩展为全面ASR/情绪验收。
+
+8769最新服务.runtime/qa/automatic-sentence-listening-server-final.mjs，静态报告data/acceptance/automatic-sentences-001-listening-final.html，展示两次通用程序新结果而非旧QA剪辑。12条音轨metadata通过；刷新原页查看。结构mock不当真人质量，全生产音频入口和更广泛样本、逐字起点、输入情绪仍待实现。无需新云调用，七段云审批拒绝仍延期。标准答案不放模型输入/编码提示；本地逐文件提交，无push。
+
+本任务工作树编码报告已复制并逐文件哈希校验到.runtime/harness-runs/automatic-sentence-worker/harness-runs，清理已合入干净工作树，Jev未验收工作树保留。监督QA审计/推理/结果对照脚本均在.runtime/qa、私人数据ignored，换设备如需复用应私下搬迁且重建虚拟环境，不expect正在运行进程迁移。
