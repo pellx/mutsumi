@@ -85,6 +85,22 @@ node tools/harness/run-luna.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=
 
 输出目录须新建或为空，character-starts.json 不覆盖旧结果。相对路径从项目根解析，模型固定本地离线CPU；status partial 保留起点重合/整词/失败，不能当逐字精度全部通过。
 
-随后 [OhMyGptEmotion](apps/server/src/providers/ohmygpt/ohmygpt-emotion.ts) 用真实人声音频和不可修改的句子投影分析情绪，固定已有 OhMyGPT Gemini 路线，每段一次请求，返回按句候选含unknown，不修改文字/时间、不编造评分。当前只接受完整可用句界且省略units的EmotionInput；占用区间不冒充旧发音首尾。模块已真实调用通过，完整生产CLI接线尚未完成。
+随后 [OhMyGptEmotion](apps/server/src/providers/ohmygpt/ohmygpt-emotion.ts) 用真实人声音频和不可修改的句子投影分析情绪，固定已有 OhMyGPT Gemini 路线，每段一次请求，返回按句候选含unknown，不修改文字/时间、不编造评分。当前只接受完整可用句界且省略units的EmotionInput；占用区间不冒充旧发音首尾。模块此前已真实调用通过；人声 CLI 见下文，新 CLI 的云端端到端验收仍待具体目的地确认。
 
 [本轮验收](docs/reviews/M02-character-starts-emotion.md)：字头24项独立检查、情绪36项、完整构建与287项回归通过；两段真人10句得到154原生单位/149占用区间，两次情绪HTTP200得到10候选。字头精度、原话和情绪仍待真人核对。私有试听页 http://127.0.0.1:8770/（服务运行时），每句播放和字块试听；原分句8769、原音分离对照8768保留。应用代码仍仅ChatGPT认证gpt-6-luna CLI编写，逐文件本地提交，无push。
+
+## 人声分析统一 CLI（2026-10-04）
+
+[analyze-vocals.mjs](tools/analyze-vocals.mjs) 已接通：已分离的单声道16kHz WAV + 完整原文 → 自动分句 → 每句内部字／词起点与占用块 → 可选逐句情绪。默认全本地，不读取 .env；不会输入参考句子或读取缓存对齐。它还不包含原音整体分析、人声分离、ASR、人格／记忆或 TTS 的统一入口。
+
+在项目根目录运行；本机 bundled Node24.19.0 的路径如下，迁移时替换为新设备 Node 路径。输出目录每次使用新的 data/ 或 .runtime/ 子目录，已有目录不覆盖：
+
+```powershell
+& 'C:/Users/anpel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe' tools/analyze-vocals.mjs --audio data/acceptance/automatic-sentences-001/inputs/audio-2.wav --text-file data/acceptance/automatic-sentences-001/inputs/text-2.json --output-dir data/acceptance/my-vocals-cli-001
+```
+
+实际输出：inputs/ 原始快照、sentences/sentences.json 和裁剪 WAV、character-starts/character-starts.json、result.json；中途失败保留已完成结果和 failure.json。partial 明确保留起点重合／整词／失败；相邻起点时长含停顿，不等同于精确发音时长。纯本地 partial 可 exit0，请仍检查逐阶段状态。
+
+--emotion 会在字头结果保存后使用已配置的 OHMYGPT_API_KEY、可选 OHMYGPT_PROXY_URL，发送真实人声快照与不可修改的句子投影到 https://api.ohmygpt.com/v1/chat/completions，固定 gemini-3.8-flash，一段一次请求，无自动重试。仅支持≤30秒且所有句界可用；要求情绪但不可用／失败时 exit1。密钥不放命令行，子进程代理只作用于该 Node 请求，Python 子进程不继承凭据或代理。本轮该云端验收被自动审批拦截，已请求用户对具体目的地确认，尚未执行；此前适配器成功调用不冒充本次成功。
+
+[验收记录](docs/reviews/M02-vocals-cli.md)：34项结构＋7项子进程检查通过；一次新衣柜真人本地 CLI 推理99.3秒，自主3句、40原生单位／39正占用块，实际裁剪帧数匹配。字头精度仍待真人听审。[8770试听页](http://127.0.0.1:8770/) 的衣柜部分展示本次新结果，情绪标为本次未请求。应用源码通过 ChatGPT 认证的 gpt-6-luna CLI 写入，逐文件立即本地提交，无push。
