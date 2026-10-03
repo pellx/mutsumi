@@ -1,0 +1,35 @@
+# M02 isolated-vocals analysis CLI review (2026-10-04)
+
+Supervisor accepts the LOCAL integration of tools/analyze-vocals.mjs after independent review and fresh owner-recording inference. CLI cloud-emotion transport is implemented and structurally checked; its fresh real-cloud end-to-end acceptance is pending explicit destination approval. This is not the full original-audio -> scene/separation/ASR -> persona pipeline and is not owner character/emotion listening acceptance.
+
+## Implementation and contract
+
+Application source was requested through Codex CLI 0.160.0, ChatGPT login verified, model argument gpt-6-luna (low/medium). Harness metadata records the configured model; occasional generated summaries claimed another model identity and are not independent backend attestation. No alternate provider was selected. Supervisor wrote tasks and ignored QA, independently reviewed, and immediately committed each individual tracked-file write, including failed drafts before repair. No push. Accepted final source main23c299c.
+
+CLI accepts already isolated mono16k WAV + exact UTF8 text or exact {transcript} JSON, and a NEW output descendant of project data/.runtime. Root derives from module path. Inputs are bounded and copied to owned snapshots before local workers. Automatic sentence inference runs first, then each final sentence receives independent character-start inference, then optional input emotion; completed outputs survive later failures. No reference/count/case/cache input, forced equal subdivision, phonetic ends, automatic retries or fallback.
+
+Original sentence metadata/text is immutable. Character/word starts group duplicate onsets; adjacent starts delimit positive occupancy including pauses, final cell to sentence end. Native words remain words. Minimal unavailable, lexical mismatch and invalid/reversed-start diagnoses remain honest partial results with no active view. Active markers require all eligible lexical units and explicit ambiguity/quality; no unit end_ms. Raw native start_time/end_time are diagnostics only.
+
+--emotion is opt-in, fixed api.ohmygpt.com/v1/chat/completions gemini-3.8-flash through existing adapter. It uses the audio snapshot and frozen sentence IDs/text/available bounds, omitting units because occupancy is not old phonetic Timing. Local/help/import avoid dotenv. Only selected key/proxy parsed as bounded data; proxy re-entry uses this Node process only, secret in environment, never arguments. Python child environment contains only whitelisted OS fields, no provider keys/proxy. No global proxy/pagefile/driver edits.
+
+## Independent checks
+
+34 structural pipeline/artifact checks passed plus7 subprocess CLI checks (41 total). Saved real provider JSON replays, synthetic metadata, fake workers/models/keys are explicitly structural mocks, NOT new inference/acoustic acceptance. Coverage includes Unicode codepoint offsets, partial/Fumo intact words, unavailable/invalid records, marker coverage/ambiguity, positive adjacent cells, projection immutability, mismatched stdout/artifact, foreign emotion IDs, retained failures, exclusive/outside outputs, pre-abort, noncooperative shared deadlines, safe flags/help, malformed dotenv ignored locally, actual proxy child re-entry/exit1 preservation, and bounded actual child timeout. Final source syntax and dependency-free adapter import passed. No repeated whole TS suite for this MJS-only change; prior emotion-adapter build/287 regressions remain separate historical evidence.
+
+Commands: bundled Node .runtime/qa/vocals-cli-checks.mjs and .runtime/qa/vocals-cli-process-checks.mjs. Results .runtime/qa/vocals-cli-checks-results.json and vocals-cli-process-checks-results.json; pre-view repair failures retained separately. Private QA fixtures stay ignored. Earlier Luna regex/syntax/subset drafts failed independent checks, were committed before repair, and never treated as accepted.
+
+## Fresh human-audio CLI run
+
+Current device read-only recheck: Xeon E5-2673v3 12cores/24threads, visible RAM33390216KiB/free26642880KiB at snapshot; RTX2060 6144MiB/driver591.44,5361MiB free at later snapshot. Existing D pagefile2048MB/usage0, E about589MB/C about3.34GB bytes free before final outputs. No CUDA installation or old-device assumptions. Node24.19.0, aligner Python3.12.14/Torch2.10.0+cpu; pinned existing offline weights reused, no duplicate downloads.
+
+Exactly one fresh LOCAL CLI run used owner wardrobe isolated audio (neutral audio-2.wav) and complete transcript, without --emotion. Output data/acceptance/vocals-cli-live-local-001. Exit0, partial by honest duplicate onset,99,342ms total. Fresh sentence model load66,998ms/coarse inference1,697ms; character model load13,934ms and per-sentence inference518/509/444ms. These are measured wall-clock diagnostics, not audio timestamps. A separate no-audio minimal-environment Torch import diagnostic passed while the first model load was slow.
+
+Actual158407frames/16k, rounded duration9900ms. Automatic3parts equal owner's target AFTER run; no reference read by runtime. Bounds0..2560,3280..6160,7610..9850ms remain model candidates.40native units/39positive occupancy cells/1merged onset group; no fabricated independent onset for merged characters. Three physical WAV crops40960/46080/35840frames match candidate sample ranges. Original snapshot SHA256 verified. Private .runtime/qa/vocals-cli-live-local-result.json, vocals-cli-local-audit.json, vocals-cli-local-crop-audit.json preserve measurements; human listening pending.
+
+8770 private page now shows historical Fumo and fresh CLI wardrobe with emotion explicitly 本次未请求.10actual audio metadata checks pass,149blocks,zero0msblocks. This metadata/playability check is not phonetic acceptance. Server .runtime/qa/character-starts-listening-server.mjs, session16265 (process IDs do not migrate).
+
+## Cloud acceptance blocked
+
+Automatic approval twice rejected launching .runtime/qa/vocals-cli-live.mjs BEFORE execution (no audio sent by either command). First reason: generalized cloud permission did not specify api.ohmygpt.com. Supervisor read D24/D25/D37 and prior same-recording review as authorization evidence; explicit same-command re-review again rejected, stating documentation/prior records cannot substitute direct owner approval for this destination. No workaround or indirect upload. Async owner question asks specifically this wardrobe vocal track -> https://api.ohmygpt.com/v1/chat/completions gemini-3.8-flash once. Pending; elapsed time is not approval.
+
+Local work completed independently. Existing prior adapter live emotion results remain historical; mocks and prior calls do NOT establish the new CLI cloud run. No new live result directory vocals-cli-live-001 or live-result.json was created. Seven-clip cloud rejection/deferred work unchanged. Persona/memory/context and custom-timbre TTS comparison remain separate backlog.
