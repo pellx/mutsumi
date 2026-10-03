@@ -178,3 +178,17 @@ ignored data/acceptance/character-starts-001有output-1/output-2真实字头结�
 编码前几轮遇到主仓库ACL、裸python不可用及命令转义/锚点失败；无source写入时保留失败日志，Luna错误总结不当检查成功。所有应用源码最终由指定Luna在E:/mutsumi/onsets-emotion-worker完成，监督独立审查通过后合入。完整运行报告保存并哈希验证后清理本轮工作树；未验收E:/mutsumi/jev-quota-worker仍保留。没有push，私有音频/凭据不发送编码模型。七段素材云审批拒绝仍延期，TTS自定义音色比较继续暂缓。
 
 下一步先等用户试听字头/情绪反馈，修复一般能力而非喂样例标准答案；随后按任务继续生产CLI双来源上下文/人格与真实回复/记忆，Jev仅回复表达。不要宣称声学精度已经human accepted或整套生产语音程序已接通。
+
+### 本地人声统一 CLI（2026-10-04，D43）
+
+真实仓库 E:/mutsumi/mutsumi。tools/analyze-vocals.mjs 已接已分离mono16k WAV+完整原文 -> 自动分句 -> 每句新字头推理 -> 可选输入情绪。监督接受本地部分，41项独立检查通过（34结构+7子进程），adapter无请求导入和语法通过。详见 reviews/M02-vocals-cli.md，README含本机命令。原音整体/分离/ASR、双来源人格上下文、记忆和自定义音色TTS仍不在这条入口内。
+
+本机重新只读核验 XeonE5-2673v3 12/24，RAM33390216KiB/free26642880KiB，RTX2060 6144MiB/driver591.44/free5361MiB（不同时间快照），D pagefile2048MB/usage0，E约589MB/C约3.34GB bytes空余。Node24.19.0/alignerPython3.12.14/Torch2.10.0+cpu，现有本地权重复用，无CUDA/页面文件/系统代理更改。不要当其他设备事实迁移。
+
+一次新衣柜真人 LOCAL CLI run（不含 --emotion）在 ignored data/acceptance/vocals-cli-live-local-001；exit0/partial，耗时99.342s，其中首次句子模型加载66.998s，字头模型加载13.934s。自动3句在运行结束后才读标准比较，一致；40原生单位/39正占用cell/1重合组，不强拆我/把，实际三段裁剪40960/46080/35840frames匹配。3句边界0..2560、3280..6160、7610..9850ms仍模型候选；全音158407frames/16k，rounded9900ms。原始快照SHA校验通过；所有私有计时/检查/来源在 .runtime/qa/vocals-cli-*，不提交素材。声学字头/情绪真人听审未完成。
+
+最新8770 QA服务 .runtime/qa/character-starts-listening-server.mjs/session16265，衣柜改用本次CLI新结果，显示情绪本次未请求；Fumo保留上轮候选。10条浏览器真实duration元数据/149cells/0零长块通过。重开页面需刷新；迁移需私下搬运ignored材料及重建环境，不能复制进程/绝对venv路径。旧8768/8769不保证还运行。
+
+本轮 CLI --emotion 真云验收未执行：自动审批两次在启动前拒绝，认为泛称云端和文档/既有记录未提供目的地直接授权；已通过async问用户明确确认“衣柜分离轨 -> https://api.ohmygpt.com/v1/chat/completions / gemini-3.8-flash一次”。尚无答案，不能把时间经过视为批准；不得绕过、换脚本上传或借旧情绪响应伪造本次成功。原拟 .runtime/qa/vocals-cli-live.mjs/data/acceptance/vocals-cli-live-001 未执行/未创建。批准后才做具体云验收；如果拒绝，保持本地分析。七段素材云拒绝仍独立延期。
+
+应用代码所有写入均经过指定ChatGPT认证 gpt-6-luna CLI配置，监督逐文件立即单独提交，坏草稿也先提交再修复，最终主源码23c299c。生成总结偶有自称其他模型，不作为独立实际backend证明；harness --check确认ChatGPT认证和CLI指定模型。10轮完整编码报告复制到主 .runtime/harness-runs/vocals-cli-worker/harness-runs，每文件SHA256验证；最终源码Git blob fcc0a2dfd9b0b16896d363b451d796c2e889012b一致（工作区仅LF/CRLF差异）。本轮干净已合入 E:/mutsumi/vocals-cli-worker 已移除，Jev未验收 E:/mutsumi/jev-quota-worker保留。主仓库本地提交，无push，密钥/录音/QA均ignored。
