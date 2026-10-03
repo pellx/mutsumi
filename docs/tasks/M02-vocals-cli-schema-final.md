@@ -1,0 +1,15 @@
+# M02 validator schema compatibility correction
+
+ONE target tools/analyze-vocals.mjs; read target + onset_result.py + character_starts.py (actualoutputschemas) ONLY. No private/model/tests. Limit modifications validateSentences/validateStarts. Onewrite thenabsoluteNode --check actual0stop. Earlier genericvalidation accidentally rejected actualnativefields; repair exactcompatibility WITHOUT inventing units orweakeningcellbounds. Do not rewrite acousticmapper inJS.
+
+Actual source EXACT 'Qwen/Qwen3-ForcedAligner-0.6B' (prefix Qwen/ REQUIRED): replace incorrect 'Qwen3-ForcedAligner-0.6B' in BOTHvalidators/mappedsourcechecks. Thiswrongliteralrejectseveryrealaudio.
+
+Actual unavailable onset_result is MINIMAL {status:'unavailable',reason:...}, no sentence_id/transcript/source/units/raw_units. Checkthisvariant BEFOREfullmappedmetadata. Require reasonnonblank, markers/occupancy_cells empty,prefix_unassigned_ms null; no activeunitdata, accept absentunits/rawunits not insistarrays. Parentrecord.sentence exactmetadatastillrequired, topresult mustpartial. No fake timestamp.
+
+Actual invalid mapperhas lexical_coverage mismatch,statusinvalid andCOMPLETEraw/units, no top-levelreason field! Acceptinvalid lexicalmismatch+emptymarkers/cells,nullprefix withoutrequiring reason onmappedroot. Preserveunitreasons. Partialwithinvalidstart/reversal canhaveempty markers/cells; acceptit as partial, nevertopok. Nonmonotonicrawstarts cannotactivecells evenwhenrounded equal; use originalrawstartfinite/order+mapperreason foractive guard, not new time calculation.
+
+Nativeword inmapper: granularityword, statusunavailable, reason native_unit_not_character, VALID onset_ms. build_views DOEScreateword marker/cell labelledinsufficient_character_granularity. PermitTHISspecificunit inmarker coverage despite unavailable; never splitnativeword/claimit charcandidate. Expectedcoveredindices needinclude availableword entries above + candidate/ambiguouschars whenactive. Otherunavailable units mustnot bemarkers. Fumo intact word is normalpartial output, NOTerror.
+
+Unit phonetic leakage check belongs on u (NOT just raw): reject start_ms/end_ms/duration_ms fields on UNIT; raw_units intentionally retains start_time/end_time originalseconds. u.text maynullONLY unsupported/unavailablediagnostic (mapper allowsNone), character/word text nonblankstring. Don't rejecthonest rawdiagnostics. Granularityword cannotmap statuscandidatechar. No copyfakeends. Emptycellswithvalidfullcandidate? candidate mustactual markers coveringall validunits; partialinvalid mayno cells. Markeruniqueonsetstrict/order/ownedindices/text/granularity andpositiveadjacent occupancyverifiedremain. Prefixmust firstmarker.onset-parent.start whenactive, nullotherwise. Topok ONLYallonset_resultcandidate; partialforword/ambiguous/unavailable/invalid.
+
+Allotherstrictsentence metadata/codepoint/frames status+cellboundarycheckskeep. Supervisor30structuralcases and real savedpartialfumo/wardrobe outputs revealfalse rejection. These JSONreplays onlytests; notallowcache/reference flag or fakecorrectdata. Onewrite thencheckstop.
