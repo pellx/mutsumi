@@ -1,0 +1,7 @@
+# One missing mandatory validator guard
+
+ONE target tools/analyze-vocals.mjs. Read only target. ChatGPT-authenticated gpt-6-luna implementation, one write then exact absolute Node syntax check exit0 and STOP. No private files/config/tests/model reads or calls.
+
+The last patch passed 33 checks but still violates its explicit nonempty eligible-view requirement. In validateStarts, AFTER the new !eligible branch, the old branch remains: if(r.markers.length===0){if(r.prefix_unassigned_ms!==null)return bad();allCandidate=false;continue;}. This allows deleting ALL cells from an otherwise valid candidate and labeling top partial. Replace EXACTLY that single branch with if(r.markers.length===0)return bad();. Both honest invalid/partial empty cases already continue via !eligible or invalid branches, so they stay allowed. Verify anchor exactly once BEFORE writing. Do not rewrite anything else or alter any regex. This is the ONLY requested application change. Supervisor independent check now34 cases plus7process, followed by human-input CLI run. Use a literal string replacement via safe single-quoted here-string; assert before write. No code compaction, model identity speculation or extra scopes.
+
+Check using C:/Users/anpel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe --check tools/analyze-vocals.mjs. Stop after one write; supervisor commits.
