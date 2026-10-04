@@ -2,7 +2,7 @@ import type { EmotionResult } from './input-stage-ports.ts';
 
 export type VocalAffectProfile = {
   readonly segment_id: string;
-  readonly label: 'neutral' | 'positive' | 'negative' | 'unknown';
+  readonly label: 'neutral' | 'happy' | 'sad' | 'angry' | 'fearful' | 'surprised' | 'disgusted' | 'unknown';
   readonly status: 'candidate' | 'unavailable';
   readonly valence: 'negative' | 'neutral' | 'positive' | 'mixed' | 'unknown';
   readonly arousal: 'low' | 'medium' | 'high' | 'unknown';
@@ -32,7 +32,7 @@ export type DetailedEmotionResult = EmotionResult & { readonly vocal_affect: Voc
 const profileKeys = ['segment_id', 'label', 'status', 'valence', 'arousal', 'emotion_tags', 'tone_tags', 'delivery', 'evidence', 'uncertainty', 'summary'] as const;
 const deliveryKeys = ['pace', 'energy', 'pitch_variation', 'contour', 'voice_quality'] as const;
 const evidenceKeys = ['dimension', 'description'] as const;
-const labels = ['neutral', 'positive', 'negative', 'unknown'] as const;
+const labels = ['neutral', 'happy', 'sad', 'angry', 'fearful', 'surprised', 'disgusted', 'unknown'] as const;
 const valences = ['negative', 'neutral', 'positive', 'mixed', 'unknown'] as const;
 const arousals = ['low', 'medium', 'high', 'unknown'] as const;
 const emotions = ['calm', 'content', 'amused', 'excited', 'curious', 'surprised', 'annoyed', 'frustrated', 'angry', 'disappointed', 'sad', 'worried', 'fearful', 'uncertain', 'relieved'] as const;
@@ -50,6 +50,7 @@ const textSchema = (maxLength: number) => ({ type: 'string', minLength: 1, maxLe
 const arraySchema = (items: Record<string, unknown>, maxItems: number) => ({ type: 'array', items, maxItems });
 
 export function vocalAffectResponseSchema(ids: readonly string[]): Record<string, unknown> {
+  if (!validIds(ids)) throw new Error('invalid_input');
   const evidence = { type: 'object', properties: { dimension: enumSchema(dimensions), description: textSchema(160) }, required: [...evidenceKeys], additionalProperties: false };
   const delivery = {
     type: 'object',
@@ -100,13 +101,26 @@ function strictArray(value: unknown, max: number): value is unknown[] {
   return Boolean(length && 'value' in length && length.value === value.length);
 }
 function uniqueValues<T extends string>(values: readonly T[]): boolean { return new Set(values).size === values.length; }
+function validIds(ids: unknown): ids is readonly string[] {
+  if (!Array.isArray(ids) || Object.getPrototypeOf(ids) !== Array.prototype) return false;
+  const keys = Reflect.ownKeys(ids);
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(ids, 'length');
+  if (!lengthDescriptor || !('value' in lengthDescriptor) || !Number.isInteger(lengthDescriptor.value) || lengthDescriptor.value < 1 || lengthDescriptor.value > 100 || keys.length !== lengthDescriptor.value + 1) return false;
+  const values: string[] = [];
+  for (let i = 0; i < lengthDescriptor.value; i++) {
+    const descriptor = Object.getOwnPropertyDescriptor(ids, String(i));
+    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable || !cleanString(descriptor.value, 128)) return false;
+    values.push(descriptor.value);
+  }
+  return uniqueValues(values);
+}
 
 export function parseVocalAffectProfiles(value: unknown, ids: readonly string[]): VocalAffectProfile[] | null {
-  if (!record(value, ['segments']) || !strictArray(value.segments, 100) || value.segments.length !== ids.length || ids.length < 1 || ids.length > 100) return null;
+  if (!validIds(ids) || !record(value, ['segments']) || !strictArray(value.segments, 100) || value.segments.length !== ids.length) return null;
   const output: VocalAffectProfile[] = [];
   for (let i = 0; i < ids.length; i++) {
     const raw = value.segments[i];
-    if (!record(raw, profileKeys) || raw.segment_id !== ids[i] || !cleanString(raw.segment_id, 200) || !oneOf(raw.label, labels) || !oneOf(raw.status, ['candidate', 'unavailable']) || !oneOf(raw.valence, valences) || !oneOf(raw.arousal, arousals) || !cleanString(raw.summary, 180)) return null;
+    if (!record(raw, profileKeys) || raw.segment_id !== ids[i] || !cleanString(raw.segment_id, 128) || !oneOf(raw.label, labels) || !oneOf(raw.status, ['candidate', 'unavailable']) || !oneOf(raw.valence, valences) || !oneOf(raw.arousal, arousals) || !cleanString(raw.summary, 180)) return null;
     if (!strictArray(raw.emotion_tags, 3) || !raw.emotion_tags.every((x) => oneOf(x, emotions)) || !uniqueValues(raw.emotion_tags as string[])) return null;
     if (!strictArray(raw.tone_tags, 3) || !raw.tone_tags.every((x) => oneOf(x, tones)) || !uniqueValues(raw.tone_tags as string[])) return null;
     if (!record(raw.delivery, deliveryKeys)) return null;
