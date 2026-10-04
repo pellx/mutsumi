@@ -192,3 +192,17 @@ ignored data/acceptance/character-starts-001有output-1/output-2真实字头结�
 本轮 CLI --emotion 真云验收未执行：自动审批两次在启动前拒绝，认为泛称云端和文档/既有记录未提供目的地直接授权；已通过async问用户明确确认“衣柜分离轨 -> https://api.ohmygpt.com/v1/chat/completions / gemini-3.8-flash一次”。尚无答案，不能把时间经过视为批准；不得绕过、换脚本上传或借旧情绪响应伪造本次成功。原拟 .runtime/qa/vocals-cli-live.mjs/data/acceptance/vocals-cli-live-001 未执行/未创建。批准后才做具体云验收；如果拒绝，保持本地分析。七段素材云拒绝仍独立延期。
 
 应用代码所有写入均经过指定ChatGPT认证 gpt-6-luna CLI配置，监督逐文件立即单独提交，坏草稿也先提交再修复，最终主源码23c299c。生成总结偶有自称其他模型，不作为独立实际backend证明；harness --check确认ChatGPT认证和CLI指定模型。10轮完整编码报告复制到主 .runtime/harness-runs/vocals-cli-worker/harness-runs，每文件SHA256验证；最终源码Git blob fcc0a2dfd9b0b16896d363b451d796c2e889012b一致（工作区仅LF/CRLF差异）。本轮干净已合入 E:/mutsumi/vocals-cli-worker 已移除，Jev未验收 E:/mutsumi/jev-quota-worker保留。主仓库本地提交，无push，密钥/录音/QA均ignored。
+
+### 细致输入语气与情绪（2026-10-04，D44）
+
+用户认为中性描述过泛，要求心理学／语言学和现成实现调研后实现细分析。参考和工程选择见 input-vocal-affect-design.md；独立验收见 reviews/M02-vocal-affect.md。已由指定 ChatGPT 认证 gpt-6-luna CLI 完成三个应用文件：application/vocal-affect.ts、providers/ohmygpt/ohmygpt-emotion.ts、tools/analyze-vocals.mjs。逐文件写入立即单独本地提交，无push，源模型配置不当独立 backend 证明。主仓库已合入全部应用源；旧正负标签草稿先提交后修复回原8类。
+
+--emotion 现在同一次 OhMyGPT gemini-3.8-flash 音频请求输出逐句语气、声音表现、情绪标签、valence/arousal、维度依据、未知与干扰，不改原文／句界／字头、不新增评分或伪造测量。旧 adapter 默认 detailed=false 保持兼容，CLI 强制 detailed=true 且验证／克隆 vocal_affect、核对粗标签后保存；缺失/不可信细分析失败保留本地阶段，不回退仅 neutral。模型听感不是声学 Hz/dB 或心理诊断，不写人格/身份/意图/记忆事实。whole-scene、人格/长期记忆/回复/Jev/TTS仍分开。
+
+最终独立检查43新契约/adapter+36兼容+37CLI+7子进程=123全部通过；root TS noEmit及build通过，287tests/19suites全过、0fail/skip。全部新测试为明确合成结构／假worker，不充当真人验收；coder独立file tsc曾Buffer类型失败，root配置的监督检查才是通过依据。ignored .runtime/qa各JSON、vocal-affect-regression.txt保留实际结果。未重新本地录音推理或上传音频。用户先前“效果还不错”只保留定性反馈。
+
+8770私有QA服务 .runtime/qa/character-starts-listening-server.mjs/session43980 已增加安全转义的细致展示区：10句真实音轨均细分析待执行，Fumo保留历史粗情绪，衣柜使用既有新本地CLI字头。10音轨metadata、149cells/0零长及恶意字符串合成转义检查通过；截图 vocal-affect-wardrobe-ui.png 已独立看布局。服务优先选择 data/acceptance/vocals-affect-live-001（若未来真实运行完成），否则旧本地CLI。迁移进程不保证继续，须重启。
+
+云端真实细分析仍待具体目的地批准：D43自动审批已拒绝此前衣柜上传两次，不能用旧泛称授权绕过。完成可审查实现后已async询问该衣柜分离轨发送 https://api.ohmygpt.com/v1/chat/completions / gemini-3.8-flash 一次。尚无直接答案；.runtime/qa/vocal-affect-live.mjs 已准备但未执行，预期新output data/acceptance/vocals-affect-live-001。若批准只执行一次，保留失败、无自动重试，再审真实中文语气／依据／分离干扰；不能声称质量已通过。七段素材仍独立延期。
+
+四轮 Luna 编码完整report已复制到 .runtime/harness-runs/vocal-affect-worker/harness-runs 并4文件SHA256逐一相同。三个最终source Git blob均与工作树一致：9683d825b55564b727bb7cb3d33d94a29fc37674 / d8ba1115e419be719051ac59d53d5e30cdf72b45 / 7c61029b362e71675f220c87a8f0c0704f05e5c7。已清理本轮干净 vocal-affect-worker，未验收 jev-quota-worker保留。E空余约522MB，不安装重型声学模型／改全局代理／页面文件／驱动。
