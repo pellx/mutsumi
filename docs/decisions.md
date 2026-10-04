@@ -193,3 +193,11 @@ Owner asked to continue D25/D42. Supervisor scoped this delivery to existing iso
 Local integration accepted after34 structural and7 subprocess checks plus one fresh wardrobe human-recording CLI run: exit0/partial,99.342s,3automatically inferred sentences/40nativeunits/39positivecells/1mergedgroup. Reference checked AFTER run. Actual3WAVcropframes match candidate sample spans; timestamps remain model estimates and human onset listening pending. Existing pin/offline CPU and actual current device rechecked, no model duplication/global settings changes. Private output vocals-cli-live-local-001; README/reviews/M02-vocals-cli.md contain exact status and usage.
 
 --emotion transport opt-in is implemented and structurally checked but new real-cloud CLI run is NOT accepted. Automatic approval rejected the attempted launch twice before execution, requiring direct approval of this recording -> api.ohmygpt.com despite D24/D25/D37/prior-call evidence. No cloud submission from these commands. Supervisor requested explicit owner confirmation for one wardrobe isolated-vocal request to https://api.ohmygpt.com/v1/chat/completions gemini-3.8-flash; pending. Continue safe local work, never use old reports/mocks to claim this CLI cloud run or route around rejection. Seven new clips remain deferred separately. Historical emotion results remain historical.
+
+## D44 — 按句细致语气与声音表现，分离于情绪类别（2026-10-04）
+
+用户要求 neutral 描述不再泛泛，并调研心理学／语言学与成熟实现。采用 docs/input-vocal-affect-design.md 的工程方案：参考 Russell 愉悦／唤醒环状模型、Scherer/Banziger 韵律及 Gobl/NiChasaide 声音质感研究，考察 GeMAPS/openSMILE 和 emotion2vec 官方实现；本次不安装新模型。已有 Gemini 音频 observer 在一个请求中扩展逐句 vocal_affect：语气标签、语速／能量／音高变化／升降调／声音质感、情绪候选、valence/arousal、每维声音依据、干扰与不确定说明。枚举是工程观察词汇，不声称正式心理学量表、实测声学数值或最佳模型质量。
+
+供应商无关严格校验保持原始 ID／顺序／文字／句界及旧8类情绪；所有非 unknown 判断须有对应依据。缺证据可以 unavailable，不补造中性细节、不以故事或背景音乐判断感受、不推断人格、诊断、身份、隐含意图或长期记忆事实。旧 adapter 默认粗类兼容，统一 CLI --emotion 显式请求且要求细致结果，无失败后退回 neutral、无额外请求或自动重试。仅输入观察改变，Jev 回复表达和人格系统未改变。
+
+应用代码继续 ChatGPT 认证 gpt-6-luna CLI 单文件实现，监督审查／立即单独本地提交。结构测试及私有 UI 可先完成；新衣柜云端细致分析仍受 D43 自动审批拒绝限制，须真人直接确认该轨到 https://api.ohmygpt.com/v1/chat/completions / gemini-3.8-flash 一次。此设计要求不是目的地批准，旧结果不能冒充本轮推理；七段素材仍独立延期。真人听感质量未验收。
