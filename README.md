@@ -109,3 +109,4 @@ node tools/harness/run-luna.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=
 按句分别观察语气（如解释、疑问、强调、犹豫）、声音表现（语速、能量、音高变化、升降调、声音质感）、情绪候选与愉悦／唤醒倾向，每项判断附声音依据和不确定因素。neutral 不再是唯一描述；缺少依据时明确 unknown。工程设计参考情绪环状模型、韵律／声音质感研究及 openSMILE、emotion2vec，见 [设计依据](docs/input-vocal-affect-design.md)。这些是模型听感候选，不是心理诊断或实测 Hz/dB。
 
 统一人声 CLI 的 --emotion 使用同一 Gemini 音频请求返回并严格校验 vocal_affect，保存于 emotion/emotion.json；分句、原文及字头时间不变。8770 私有试听页已有细致展示区，旧结果不补造描述，真实新分析尚待具体云端目的地确认。结构通过不等于真人语气质量通过。
+2026-10-05 已用七段压缩包第03段完成真实分阶段测试：原音整体分析、人声分离与转写、自动4停顿片段、24原生字单位／23占用块、4句细致语气候选。最初情绪请求失败，Luna修复远端生成schema兼容性及依据提示后，新CLI exit0/partial、emotion complete；重合字头仍保留partial，没有补时间。完整验收及局限见 [第03段记录](docs/reviews/M02-seven-case03-flow.md)。[8770试听页](http://127.0.0.1:8770/) 顶部可对照三轨、字块和新语气依据。听感、转写和情绪候选仍待真人核对，当前生产CLI依然从已分离音频与文字开始。
