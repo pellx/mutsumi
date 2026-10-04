@@ -1,0 +1,9 @@
+# Exact compatibility repair for vocal-affect contract
+
+ONE target apps/server/src/application/vocal-affect.ts. Read ONLY target and provider ohmygpt-emotion.ts constants LABELS (first35lines). Single literal verified write then strict typecheck, STOP supervisor immediatecommit. No private/config/tests/runtime/model reads or providers. gpt-6-luna ChatGPT CLI implementation.
+
+The contract incorrectly invented labels positive/negative, violating old coarse labels. Replace both VocalAffectProfile.label type and labels constant EXACTLY with existing eight: neutral,happy,sad,angry,fearful,surprised,disgusted,unknown. Positive/negative belong valence ONLY. Keep valence enums untouched. Assert type+constant corrected before write.
+
+Before parsing, validate supplied ids itself as dense plain array 1..100, all string/nonblank/noNUL/<=128codepoints, no duplicate IDs. schema generator validates IDs equivalently and safely throws Error('invalid_input') for malformed IDs, no huge schema allocations. Existing profile.segment_id cleanString bound200 must128 consistent with input adapter. No getter invocation through IDs arrays/accessors. Don't change other validation/vocab.
+
+TypeScript7 adds TS5112 for file-specific checks with tsconfig. Correct read-only command after onewrite: C:/Users/anpel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe E:/mutsumi/mutsumi/node_modules/typescript/bin/tsc --ignoreConfig --noEmit --strict --allowImportingTsExtensions --target ES2022 --module NodeNext --moduleResolution NodeNext --typeRoots E:/mutsumi/mutsumi/node_modules/@types apps/server/src/application/vocal-affect.ts . If failstop, no secondwrite. Do NOT run completeproject/harness/config or create tempfiles.
