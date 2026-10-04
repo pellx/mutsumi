@@ -104,3 +104,8 @@ node tools/harness/run-luna.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=
 --emotion 会在字头结果保存后使用已配置的 OHMYGPT_API_KEY、可选 OHMYGPT_PROXY_URL，发送真实人声快照与不可修改的句子投影到 https://api.ohmygpt.com/v1/chat/completions，固定 gemini-3.8-flash，一段一次请求，无自动重试。仅支持≤30秒且所有句界可用；要求情绪但不可用／失败时 exit1。密钥不放命令行，子进程代理只作用于该 Node 请求，Python 子进程不继承凭据或代理。本轮该云端验收被自动审批拦截，已请求用户对具体目的地确认，尚未执行；此前适配器成功调用不冒充本次成功。
 
 [验收记录](docs/reviews/M02-vocals-cli.md)：34项结构＋7项子进程检查通过；一次新衣柜真人本地 CLI 推理99.3秒，自主3句、40原生单位／39正占用块，实际裁剪帧数匹配。字头精度仍待真人听审。[8770试听页](http://127.0.0.1:8770/) 的衣柜部分展示本次新结果，情绪标为本次未请求。应用源码通过 ChatGPT 认证的 gpt-6-luna CLI 写入，逐文件立即本地提交，无push。
+## 细致输入情绪与语气（2026-10-04）
+
+按句分别观察语气（如解释、疑问、强调、犹豫）、声音表现（语速、能量、音高变化、升降调、声音质感）、情绪候选与愉悦／唤醒倾向，每项判断附声音依据和不确定因素。neutral 不再是唯一描述；缺少依据时明确 unknown。工程设计参考情绪环状模型、韵律／声音质感研究及 openSMILE、emotion2vec，见 [设计依据](docs/input-vocal-affect-design.md)。这些是模型听感候选，不是心理诊断或实测 Hz/dB。
+
+统一人声 CLI 的 --emotion 使用同一 Gemini 音频请求返回并严格校验 vocal_affect，保存于 emotion/emotion.json；分句、原文及字头时间不变。8770 私有试听页已有细致展示区，旧结果不补造描述，真实新分析尚待具体云端目的地确认。结构通过不等于真人语气质量通过。
