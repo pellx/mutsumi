@@ -206,3 +206,18 @@ ignored data/acceptance/character-starts-001有output-1/output-2真实字头结�
 云端真实细分析仍待具体目的地批准：D43自动审批已拒绝此前衣柜上传两次，不能用旧泛称授权绕过。完成可审查实现后已async询问该衣柜分离轨发送 https://api.ohmygpt.com/v1/chat/completions / gemini-3.8-flash 一次。尚无直接答案；.runtime/qa/vocal-affect-live.mjs 已准备但未执行，预期新output data/acceptance/vocals-affect-live-001。若批准只执行一次，保留失败、无自动重试，再审真实中文语气／依据／分离干扰；不能声称质量已通过。七段素材仍独立延期。
 
 四轮 Luna 编码完整report已复制到 .runtime/harness-runs/vocal-affect-worker/harness-runs 并4文件SHA256逐一相同。三个最终source Git blob均与工作树一致：9683d825b55564b727bb7cb3d33d94a29fc37674 / d8ba1115e419be719051ac59d53d5e30cdf72b45 / 7c61029b362e71675f220c87a8f0c0704f05e5c7。已清理本轮干净 vocal-affect-worker，未验收 jev-quota-worker保留。E空余约522MB，不安装重型声学模型／改全局代理／页面文件／驱动。
+### 第03段真实流程成功与请求兼容修复（2026-10-05，D45）
+
+用户直接同意前问具体OhMyGPT目的地，并改为压缩包七段选一个。仅选owner-seven-001/03，未上传衣柜或其余六段。原10s48k stereo，已有HTDemucs新分离10s且mono16k160000frames；原音整体与分离ASR各HTTP200一次。分离先做本地准备，cloud整体分析先于分离ASR；整体模型猜雨/滴水，文件说明炉火，均保留为未确认。转写与本地自动流程、所有实际计时/哈希和限制见 reviews/M02-seven-case03-flow.md。
+
+初次CLI data/acceptance/seven-03-flow-001/vocals-cli exit1/emotion_failed，97934ms，local成果保留。监督同例受控诊断affect-diagnostic-001捕获HTTP400 invalid argument；affect-schema-probe-001仅简化wire schema得到HTTP200但模型缺逐维依据，被原严格parser拒绝，未展示为成功。两个诊断没有自动重试，所有raw/failure保留ignored。不可单独认定某个schema字段是400根因。
+
+Luna单文件修复任务 M02-vocal-affect-wire-repair.md，应用仍指定ChatGPT认证gpt-6-luna CLI，立即逐文件提交；main9c43168。新helper只投影远端生成schema的type/properties/items/required/additionalProperties，原完整schema放详细prompt，新增中性亦需emotion依据等9维自检；本地validator/clone/语句时间/不确定性规则、legacyfalse、单POST/no fallback均不变。coder及root类型检查通过，独立43细契约/adapter+36legacy、build及287回归全过。priorCLI37+7为未修改CLI的历史结构证据。无重模型安装/globalproxy/pagefile/driver变化，E初始约0.42GiBfree。
+
+修复后真正新CLI data/acceptance/seven-03-flow-001/vocals-cli-fixed-001 exit0/partial60458ms：分句complete、字头partial、emotioncomplete。无缓存align/预设句数/外部目标，4长停顿片段边界160..1200、2960..3520、4400..5760、6800..8720ms，真人精度未听审；实际crop16640/8960/21760/30720frames匹配。24原生字单位/23正cell，第三片段1重合组，不补字头；完整hash原文/ID/时间保留。4细profiles各9依据原contract验证通过，候选耳语/气声、慢/柔、解释语气、平静/低唤醒，不能当内心测量。含依赖内容的中性依据表述及0.56s短片段仍需听审；emptyuncertainties不证明无干扰。
+
+本例whole/trans各1、两次独立诊断各1、初/终CLI各最多1emotion，共最多6阶段请求；初/终CLI未捕获独立HTTP日志，不造HTTP数字，最终通过adapter合法结果。没有发送模型切换/其他目的地/其余例子。其余材料 cloud质量仍未验收。
+
+最新8770服务 .runtime/qa/character-starts-listening-server.mjs/session49335，顶部第03段原混音/人声/伴奏、4片段与23字块、真实细卡片（旧fumo/衣柜仍在下面）。标明初次失败及最新独立运行，优先选择fixed001真实结果，17音轨metadata、4新细profiles、0零长通过；截图 .runtime/qa/seven-03-listening.png。QA/audio/raw/.env均ignored；换设备私下搬素材、重建环境和服务，不保证进程迁移。用户暂无本例真人听审反馈。
+
+本轮Luna完整1report备份 .runtime/harness-runs/affect-wire-worker/harness-runs且SHA256逐文件核对；sourceblob53739e76592b1f94f7cf5bfd57fc25bff17dd7cd与主相同。干净已合入affect-wire-worker已清理，未验收jev-quota-worker保留。所有tracked任务/验收/文档各自立即单文件本地提交，无push。当前仅监督分阶段真人验收成功，原音统一生产入口/人格/记忆/自定义TTS未因此完成。
