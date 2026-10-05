@@ -1,5 +1,5 @@
-from __future__ import annotations
-import argparse, asyncio, base64, hmac, importlib.metadata, math, os, re, struct, sys, threading, uuid
+
+import argparse, asyncio, base64, hmac, importlib.metadata, math, os, re, struct, sys, uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -8,7 +8,7 @@ MODEL = "BAAI/bge-small-zh-v1.5"
 DIMENSION = 512
 AGENT = "Mutsumi"
 MAX_BODY = 65536
-TIMEOUT = 30
+
 
 def _offline(data: Path, cache: Path) -> None:
     os.environ["MEM0_TELEMETRY"] = "false"
@@ -157,27 +157,42 @@ def build_service(data_dir: str | Path, cache_dir: str | Path, token: str,
             return v
 
     state: dict[str, Any] = {"memory": None, "lock": None}
-    operations = threading.Lock()
+    operation_lock = asyncio.Lock()
+
+    async def wait_thread(fn):
+        task = asyncio.create_task(asyncio.to_thread(fn))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            try: await task
+            finally: raise
+
     @asynccontextmanager
     async def lifespan(app):
         guard = FileLock(str(data / ".memory-service.lock"))
         try:
             guard.acquire(timeout=0)
             state["lock"] = guard
-            state["memory"] = await asyncio.to_thread(_make_memory, data, cache, memory_factory)
+            state["memory"] = await wait_thread(lambda: _make_memory(data, cache, memory_factory))
             yield
         except LockTimeout: raise RuntimeError("memory service already running") from None
         finally:
-            mem = state.pop("memory", None)
-            if mem is not None:
-                try:
-                    client = getattr(getattr(mem, "vector_store", None), "client", None)
-                    if callable(getattr(client, "close", None)): await asyncio.to_thread(client.close)
-                    db = getattr(mem, "db", None)
-                    if callable(getattr(db, "close", None)): await asyncio.to_thread(db.close)
-                except Exception: pass
-            held = state.pop("lock", None)
-            if held is not None and held.is_locked: held.release()
+            await operation_lock.acquire()
+            try:
+                mem = state.get("memory")
+                if mem is not None:
+                    def close_memory():
+                        for resource in (getattr(getattr(mem, "vector_store", None), "client", None), getattr(mem, "db", None)):
+                            close = getattr(resource, "close", None)
+                            if callable(close):
+                                try: close()
+                                except Exception: pass
+                    await wait_thread(close_memory)
+                state["memory"] = None
+            finally:
+                operation_lock.release()
+                held = state.pop("lock", None)
+                if held is not None and held.is_locked: held.release()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     @app.middleware("http")
@@ -209,7 +224,10 @@ def build_service(data_dir: str | Path, cache_dir: str | Path, token: str,
     async def safe_error(request: Request, exc: Exception):
         return JSONResponse(status_code=503, content={"detail": "service_unavailable"})
 
-    def key_ok(value): return isinstance(value, str) and hmac.compare_digest(value, token)
+    def key_ok(value):
+        if not isinstance(value, str): return False
+        try: return hmac.compare_digest(value.encode("utf-8"), token.encode("utf-8"))
+        except UnicodeEncodeError: return False
     def auth_memory(request):
         if not key_ok(request.headers.get("x-api-key")): raise HTTPException(status_code=401, detail="unauthorized")
     def auth_embedding(request):
@@ -220,29 +238,57 @@ def build_service(data_dir: str | Path, cache_dir: str | Path, token: str,
         if not key_ok(value): raise HTTPException(status_code=401, detail="unauthorized")
 
     async def call(fn):
-        def locked():
-            with operations:
-                if state["memory"] is None: raise RuntimeError("not ready")
-                return fn()
-        try: return await asyncio.wait_for(asyncio.to_thread(locked), timeout=TIMEOUT)
-        except asyncio.TimeoutError: raise HTTPException(status_code=503, detail="operation_outcome_unknown") from None
+        await operation_lock.acquire()
+        try:
+            if state["memory"] is None: raise RuntimeError("not ready")
+            return await wait_thread(fn)
         except HTTPException: raise
         except Exception: raise HTTPException(status_code=503, detail="service_unavailable") from None
+        finally: operation_lock.release()
+
+    def canonical_uuid(value):
+        if not isinstance(value, str): return False
+        try: return str(uuid.UUID(value)) == value
+        except (ValueError, AttributeError): return False
 
     def owned(mem, user_id, memory_id):
+        if not canonical_uuid(memory_id): return None
         item = mem.get(memory_id)
-        if not isinstance(item, dict) or item.get("user_id") != user_id or item.get("agent_id") != AGENT: return None
-        if not isinstance(item.get("metadata"), dict): item["metadata"] = {}
+        if (not isinstance(item, dict) or item.get("id") != memory_id or
+                item.get("user_id") != user_id or item.get("agent_id") != AGENT or
+                not isinstance(item.get("metadata"), dict)):
+            return None
         return item
 
     fields = ("status", "source_session_id", "source_turn_id", "source_kind", "created_by",
               "confirmed_by_explicit_user", "confirmation_session_id", "confirmation_turn_id",
               "last_correction_session_id", "last_correction_turn_id")
     def project(item, score=None):
-        meta = item.get("metadata") or {}
-        result = {"id": item["id"], "text": item.get("memory", ""),
-                  "metadata": {k: meta[k] for k in fields if k in meta}}
-        if score is not None and math.isfinite(score): result["semantic_similarity"] = score
+        memory_id, text, meta = item.get("id"), item.get("memory"), item.get("metadata")
+        if not canonical_uuid(memory_id) or not isinstance(text, str) or not text.strip() or len(text) > 400 or not isinstance(meta, dict): return None
+        safe = {}
+        string_limits = {"source_session_id": 96, "source_turn_id": 96, "confirmation_session_id": 96,
+                         "confirmation_turn_id": 96, "last_correction_session_id": 96, "last_correction_turn_id": 96}
+        for key in fields:
+            if key not in meta: continue
+            value = meta[key]
+            if key in string_limits:
+                if not isinstance(value, str) or not value or len(value) > string_limits[key] or not id_re.fullmatch(value): return None
+            elif key == "status":
+                if value not in ("confirmed", "candidate"): return None
+            elif key == "source_kind":
+                if value not in ("explicit_user", "model_candidate"): return None
+            elif key == "created_by":
+                if value != "mutsumi": return None
+            elif key == "confirmed_by_explicit_user":
+                if not isinstance(value, bool): return None
+            safe[key] = value
+        result = {"id": memory_id, "text": text, "metadata": safe}
+        if isinstance(score, (int, float)) and not isinstance(score, bool):
+            try:
+                actual_score = float(score)
+                if math.isfinite(actual_score): result["semantic_similarity"] = actual_score
+            except (OverflowError, ValueError): pass
         return result
     def source_meta(body, status):
         return {"status": status, "source_session_id": body.source_session_id,
@@ -258,10 +304,26 @@ def build_service(data_dir: str | Path, cache_dir: str | Path, token: str,
         auth_memory(request)
         if body.source_kind != kind: raise HTTPException(status_code=422, detail="invalid_request")
         status = "confirmed" if kind == "explicit_user" else "candidate"
-        raw = await call(lambda: state["memory"].add(body.text, user_id=body.user_id, agent_id=AGENT,
-                          metadata=source_meta(body, status), infer=False))
-        ids = [str(x["id"]) for x in raw.get("results", []) if isinstance(x, dict) and x.get("id")]
-        return {"status": status, "ids": ids[:8]}
+        def perform():
+            mem = state["memory"]
+            raw = mem.add(body.text, user_id=body.user_id, agent_id=AGENT,
+                          metadata=source_meta(body, status), infer=False)
+            accepted = []
+            results = raw.get("results", []) if isinstance(raw, dict) else []
+            for row in results:
+                memory_id = row.get("id") if isinstance(row, dict) else None
+                if not canonical_uuid(memory_id): continue
+                item = owned(mem, body.user_id, memory_id)
+                if item is None or item.get("memory") != body.text: continue
+                meta = item["metadata"]
+                if (meta.get("status") == status and meta.get("source_session_id") == body.source_session_id and
+                        meta.get("source_turn_id") == body.source_turn_id and meta.get("source_kind") == kind and
+                        meta.get("created_by") == "mutsumi"):
+                    accepted.append(memory_id)
+            if not accepted: raise RuntimeError("memory write was not verified")
+            return accepted[:8]
+        ids = await call(perform)
+        return {"status": status, "ids": ids}
     @app.post("/memory/candidates")
     async def candidates(body: Source, request: Request): return await add(body, request, "model_candidate")
     @app.post("/memory/remember")
@@ -276,12 +338,12 @@ def build_service(data_dir: str | Path, cache_dir: str | Path, token: str,
                              top_k=body.limit, rerank=False)
             rows = []
             for row in raw.get("results", []) if isinstance(raw, dict) else []:
-                if not isinstance(row, dict) or not row.get("id"): continue
-                item = owned(mem, body.user_id, str(row["id"]))
-                if item is None or item.get("metadata", {}).get("status") != "confirmed": continue
-                val = row.get("score")
-                score = float(val) if isinstance(val, (int, float)) and not isinstance(val, bool) and math.isfinite(val) else None
-                rows.append(project(item, score))
+                memory_id = row.get("id") if isinstance(row, dict) else None
+                if not canonical_uuid(memory_id): continue
+                item = owned(mem, body.user_id, memory_id)
+                if item is None or item["metadata"].get("status") != "confirmed": continue
+                projected = project(item, row.get("score"))
+                if projected is not None: rows.append(projected)
             return {"results": rows[:body.limit]}
         return await call(perform)
 
@@ -293,9 +355,11 @@ def build_service(data_dir: str | Path, cache_dir: str | Path, token: str,
             raw = mem.get_all(filters={"user_id": body.user_id, "agent_id": AGENT}, top_k=body.limit)
             rows = []
             for row in raw.get("results", []) if isinstance(raw, dict) else []:
-                if isinstance(row, dict) and row.get("id"):
-                    item = owned(mem, body.user_id, str(row["id"]))
-                    if item is not None: rows.append(project(item))
+                memory_id = row.get("id") if isinstance(row, dict) else None
+                if canonical_uuid(memory_id):
+                    item = owned(mem, body.user_id, memory_id)
+                    projected = project(item) if item is not None else None
+                    if projected is not None: rows.append(projected)
             return {"results": rows[:body.limit]}
         return await call(perform)
 
@@ -310,7 +374,12 @@ def build_service(data_dir: str | Path, cache_dir: str | Path, token: str,
             meta.update({"status": "confirmed", "confirmed_by_explicit_user": True,
                          "confirmation_session_id": body.source_session_id, "confirmation_turn_id": body.source_turn_id})
             mem.update(body.memory_id, metadata=meta)
-            return owned(mem, body.user_id, body.memory_id)
+            changed = owned(mem, body.user_id, body.memory_id)
+            if (changed is None or changed["metadata"].get("status") != "confirmed" or
+                    changed["metadata"].get("confirmation_session_id") != body.source_session_id or
+                    changed["metadata"].get("confirmation_turn_id") != body.source_turn_id):
+                raise RuntimeError("memory confirmation was not verified")
+            return changed
         item = await call(perform)
         if item is None: raise HTTPException(status_code=404, detail="not_found")
         return {"status": "confirmed", "memory": project(item)}
@@ -372,7 +441,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535: parser.error("--port must be between 1 and 65535")
     token = os.environ.get("MUTSUMI_MEMORY_API_KEY", "")
-    if len(token) < 24: parser.error("MUTSUMI_MEMORY_API_KEY must contain at least 24 characters")
+    if not isinstance(token, str) or len(token) < 24 or not token.strip() or "\r" in token or "\n" in token:
+        parser.error("MUTSUMI_MEMORY_API_KEY must contain at least 24 nonblank characters and no line breaks")
     try:
         data, cache = _absolute(args.data_dir, False), _absolute(args.cache_dir, True)
         _offline(data, cache)
