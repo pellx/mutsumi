@@ -134,11 +134,11 @@ function localBase(baseUrl) {
 function boundedError(reason) { const e = new Error(reason); e.code = reason; return e; }
 
 const TOOL_NAMES = new Set(['mutsumi_web_search', 'mutsumi_video_captions', 'mutsumi_knowledge_search', 'mutsumi_memory_search', 'mutsumi_memory_candidate']);
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function boundedToolId(value) { return typeof value === 'string' && value.length > 0 && value.length <= 200 && IDENT.test(value); }
-function safeTitle(value) { return typeof value === 'string' && [...value].length <= 200 ? value : null; }
+function safeTitle(value) { return typeof value === 'string' && [...value].length <= 200 && value.trim().length > 0 && !/[\u0000-\u001f\u007f-\u009f]/.test(value) ? value : null; }
 function externalUrl(value, max = 1000) {
-  if (typeof value !== 'string' || value.length > max) return null;
+  if (typeof value !== 'string' || value.length > max || value !== value.trim() || /[\u0000-\u001f\u007f-\u009f]/.test(value)) return null;
   try {
     const u = new URL(value);
     const host = u.hostname.toLowerCase().replace(/\.$/, '');
@@ -146,29 +146,26 @@ function externalUrl(value, max = 1000) {
     return u.href;
   } catch { return null; }
 }
-function safeRecordId(value) { return typeof value === 'string' && value.length <= 200 && /^[A-Za-z0-9_-]+$/.test(value) ? value : null; }
+function safeRecordId(value) { return typeof value === 'string' && value.length > 0 && value.length <= 200 && /^[A-Za-z0-9_-]+$/.test(value) ? value : null; }
 function parseToolContent(value) {
-  let text;
-  if (typeof value === 'string') text = value;
-  else if (Array.isArray(value) && value.length <= 32 && value.every(x => plain(x) && x.type === 'text' && typeof x.text === 'string')) text = value.map(x => x.text).join('\n\n');
-  else return null;
-  try { const parsed = JSON.parse(text); return plain(parsed) ? parsed : null; } catch { return null; }
+  if (typeof value !== 'string') return null;
+  try { const parsed = JSON.parse(value); return plain(parsed) ? parsed : null; } catch { return null; }
 }
 function projectToolResult(toolName, value) {
   const data = parseToolContent(value);
-  if (!data) return { status: 'unavailable', refs: [], actions: [] };
+  if (!TOOL_NAMES.has(toolName) || !data) return { status: 'unavailable', refs: [], actions: [] };
   if (toolName === 'mutsumi_memory_candidate') {
     const actions = [];
-    if (data.status === 'candidate') {
-      const candidates = [];
-      if (typeof data.memory_id === 'string') candidates.push(data.memory_id);
-      if (Array.isArray(data.records)) for (const item of data.records.slice(0, 8)) if (plain(item) && typeof item.memory_id === 'string') candidates.push(item.memory_id);
-      for (const memory_id of candidates) if (UUID.test(memory_id) && actions.length < 8 && !actions.some(x => x.memory_id === memory_id)) actions.push({ action: 'candidate', memory_id: memory_id.toLowerCase(), status: 'candidate' });
+    if (data.status === 'candidate' && Array.isArray(data.records)) {
+      for (const item of data.records.slice(0, 8)) {
+        if (!plain(item) || typeof item.id !== 'string' || !UUID.test(item.id) || item.id !== item.id.toLowerCase()) continue;
+        if (actions.length < 8 && !actions.some(x => x.memory_id === item.id)) actions.push({ action: 'candidate', memory_id: item.id, status: 'candidate' });
+      }
       return { status: 'candidate', refs: [], actions };
     }
     return { status: data.status === 'unknown_write_outcome' ? 'unknown_write_outcome' : 'unavailable', refs: [], actions };
   }
-  if (data.status === 'empty' || (data.status === 'ok' && (Array.isArray(data.results) ? data.results.length === 0 : toolName === 'mutsumi_video_captions' && !data.source_url))) return { status: 'empty', refs: [], actions: [] };
+  if (data.status === 'empty' || (data.status === 'ok' && Array.isArray(data.results) && data.results.length === 0) || (data.status === 'ok' && toolName === 'mutsumi_video_captions' && typeof data.text === 'string' && !data.text.trim())) return { status: 'empty', refs: [], actions: [] };
   if (data.status !== 'ok') return { status: data.status === 'unknown_write_outcome' ? 'unknown_write_outcome' : 'unavailable', refs: [], actions: [] };
   const refs = [];
   if (toolName === 'mutsumi_web_search' && Array.isArray(data.results)) {
@@ -176,8 +173,9 @@ function projectToolResult(toolName, value) {
   } else if (toolName === 'mutsumi_knowledge_search' && Array.isArray(data.results)) {
     for (const item of data.results.slice(0, 32)) if (plain(item)) { const kb_id = safeRecordId(item.kb_id), doc_id = safeRecordId(item.doc_id), chunk_id = safeRecordId(item.chunk_id), title = safeTitle(item.title); if (kb_id && doc_id && chunk_id && title !== null) refs.push({ kind: 'knowledge', kb_id, doc_id, chunk_id, title }); }
   } else if (toolName === 'mutsumi_video_captions') {
-    const source_url = externalUrl(data.source_url); const title = safeTitle(data.title);
-    if (source_url && title !== null) refs.push({ kind: 'video_captions', source_url, title });
+    const match = typeof data.source_url === 'string' && data.source_url.length <= 1000 && data.source_url === data.source_url.trim() && !/[\u0000-\u001f\u007f-\u009f]/.test(data.source_url) ? /^https:\/\/www\.youtube\.com\/watch\?v=([A-Za-z0-9_-]{11})$/.exec(data.source_url) : null;
+    const title = safeTitle(data.title);
+    if (match && title !== null && typeof data.text === 'string' && data.text.trim()) refs.push({ kind: 'video_captions', source_url: 'https://www.youtube.com/watch?v=' + match[1], title });
   }
   return { status: 'ok', refs, actions: [] };
 }
@@ -189,6 +187,13 @@ function addToolResult(call, rawResult, trace, references, memoryActions) {
     if (references.length < 12 && !references.some(x => JSON.stringify(x) === key)) references.push(ref);
   }
   for (const action of projected.actions) if (memoryActions.length < 8 && !memoryActions.some(x => x.memory_id === action.memory_id)) memoryActions.push(action);
+}
+function traceUnavailableTool(name, trace) {
+  if (TOOL_NAMES.has(name)) trace.push({ event_type: 'tool_result', tool_name: name, status: 'unavailable' });
+}
+function parseNativeToolPayload(value) {
+  if (typeof value !== 'string' || value.length > MAX_FRAME_BYTES) return null;
+  try { const parsed = JSON.parse(value); return plain(parsed) ? parsed : null; } catch { return null; }
 }
 
 export async function sendChat(input, { baseUrl, apiKey, fetchImpl = globalThis.fetch, signal, timeoutMs = 90000 } = {}) {
@@ -216,7 +221,7 @@ export async function sendChat(input, { baseUrl, apiKey, fetchImpl = globalThis.
     if (!response.body) throw boundedError('empty_response');
     reader = response.body.getReader();
     let bytes = 0, buffer = '', reply = '', ended = false, eventCount = 0;
-    const trace = [], encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true });
+    const trace = [], references = [], memoryActions = [], pendingCalls = new Map(), seenCallIds = new Set(), callNames = new Map(), encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true });
     const event = frame => {
       if (encoder.encode(frame).byteLength > MAX_FRAME_BYTES) throw boundedError('frame_too_large');
       const lines = frame.split(/\r?\n/);
@@ -239,6 +244,35 @@ export async function sendChat(input, { baseUrl, apiKey, fetchImpl = globalThis.
         if (obj.data === CORE_ERROR) throw boundedError('provider_error');
         if (obj.streaming === true) throw boundedError('unexpected_streaming');
         if (!obj.data.length) throw boundedError('invalid_response');
+        if (obj.chain_type === 'tool_call') {
+          const payload = parseNativeToolPayload(obj.data);
+          if (payload && TOOL_NAMES.has(payload.name)) {
+            const name = payload.name;
+            if (boundedToolId(payload.id)) {
+              if (seenCallIds.has(payload.id) || seenCallIds.size >= 32) traceUnavailableTool(name, trace);
+              else {
+                seenCallIds.add(payload.id);
+                pendingCalls.set(payload.id, { id: payload.id, name });
+                callNames.set(payload.id, name);
+              }
+            } else traceUnavailableTool(name, trace);
+          }
+          return;
+        }
+        if (obj.chain_type === 'tool_call_result') {
+          const payload = parseNativeToolPayload(obj.data);
+          if (payload && boundedToolId(payload.id)) {
+            const call = pendingCalls.get(payload.id);
+            if (call) {
+              pendingCalls.delete(payload.id);
+              seenCallIds.add(payload.id);
+              if (typeof payload.result === 'string') addToolResult(call, payload.result, trace, references, memoryActions);
+              else traceUnavailableTool(call.name, trace);
+            } else if (callNames.has(payload.id)) traceUnavailableTool(callNames.get(payload.id), trace);
+            else if (seenCallIds.size < 32) seenCallIds.add(payload.id);
+          }
+          return;
+        }
         if (obj.chain_type !== undefined && obj.chain_type !== null && obj.chain_type !== 'normal') {
           const labels = ['analysis', 'agent', 'plugin', 'reasoning', 'tool'];
           trace.push({ event_type: 'plain_other_chain', chain_type: labels.includes(obj.chain_type) ? obj.chain_type : 'other' });
@@ -250,6 +284,7 @@ export async function sendChat(input, { baseUrl, apiKey, fetchImpl = globalThis.
       }
       if (['tool_call', 'tool_call_result', 'reasoning', 'session_id', 'user_message_saved', 'run_started', 'agent_stats', 'message_saved'].includes(obj.type)) trace.push({ event_type: obj.type });
       else trace.push({ event_type: 'metadata' });
+    };
     };
     const consumeText = text => {
       buffer += text;
@@ -280,7 +315,7 @@ export async function sendChat(input, { baseUrl, apiKey, fetchImpl = globalThis.
     }
     if (signal?.aborted || timedOut) throw boundedError(timedOut ? 'timeout' : 'aborted');
     if (!ended || !reply.trim()) throw boundedError('incomplete_response');
-    return { schema_version: OUTPUT_SCHEMA, status: 'ok', user_id: clean.user_id, session_id: clean.session_id, reply_text: reply, source: MODEL_SOURCE, expression: { status: 'unavailable', reason: 'jev_not_connected' }, tts: { status: 'unavailable', reason: 'not_requested' }, tool_trace: trace, references: [] };
+    return { schema_version: OUTPUT_SCHEMA, status: 'ok', user_id: clean.user_id, session_id: clean.session_id, reply_text: reply, source: MODEL_SOURCE, expression: { status: 'unavailable', reason: 'jev_not_connected' }, tts: { status: 'unavailable', reason: 'not_requested' }, tool_trace: trace, references, memory_actions: memoryActions };
   } catch (e) {
     if (e?.code) throw boundedError(e.code);
     throw boundedError(timedOut ? 'timeout' : signal?.aborted ? 'aborted' : 'response_error');
