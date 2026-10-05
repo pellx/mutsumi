@@ -37,8 +37,7 @@ function selected(value, required, error = 'invalid_preview') {
     out[key] = descriptor.value;
   }
   return out;
-}
-function str(v, max, nonblank = false) {
+}function str(v, max, nonblank = false) {
   if (typeof v !== 'string' || [...v].length > max || (nonblank && !v.trim())) throw new Error('invalid_input');
   return v;
 }
@@ -47,7 +46,7 @@ function id(v, max) {
   return v;
 }
 function denseArray(value, maxCount, error = 'invalid_input') {
-  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length > maxCount) throw new Error(error);
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length === 0 || value.length > maxCount) throw new Error(error);
   const own = Reflect.ownKeys(value);
   if (own.length !== value.length + 1 || !own.includes('length')) throw new Error(error);
   for (let i = 0; i < value.length; i++) {
@@ -55,8 +54,7 @@ function denseArray(value, maxCount, error = 'invalid_input') {
     if (!d || !Object.hasOwn(d, 'value')) throw new Error(error);
   }
   return value;
-}
-function list(v, maxCount, maxString) {
+}function list(v, maxCount, maxString) {
   denseArray(v, maxCount);
   const out = [];
   for (let i = 0; i < v.length; i++) out.push(str(Object.getOwnPropertyDescriptor(v, String(i)).value, maxString));
@@ -96,7 +94,7 @@ export function validateChatInput(value) {
     seen.add(segment_id);
     const va = u.vocal_affect;
     keys(va, ['status', 'summary', 'uncertainty', 'source_provider', 'source_model'], ['status', 'summary', 'uncertainty']);
-    if (!['available', 'unavailable'].includes(va.status)) throw new Error('invalid_input');
+    if (!['available', 'candidate', 'unavailable'].includes(va.status)) throw new Error('invalid_input');
     utterances.push({ segment_id, text: str(u.text, 2000, true), vocal_affect: { status: va.status, summary: str(va.summary, 1000), uncertainty: list(va.uncertainty, 12, 300), ...providerInfo(va, 'source_provider', 'source_model') } });
   }
   if (utterances.map(u => u.text).join('') !== transcript) throw new Error('invalid_input');
@@ -106,11 +104,10 @@ export function validateChatInput(value) {
 export function projectAudioPreview(preview, { user_id, session_id } = {}) {
   const root = selected(preview, ['schema_version', 'artifact_kind', 'vocal_transcription', 'whole_audio', 'utterances']);
   if (root.schema_version !== 'audio-context-preview-0.1' || root.artifact_kind !== 'supervisor_review_projection_not_production_contract') throw new Error('invalid_preview');
-  const tr = selected(root.vocal_transcription, ['transcript', 'source_provider', 'source_model']);
+  const tr = selected(root.vocal_transcription, ['transcript']);
   const sceneIn = selected(root.whole_audio, ['scene_summary', 'uncertainties', 'source_provider', 'source_model']);
   const transcript = str(tr.transcript, 6000, true);
   const items = denseArray(root.utterances, 64, 'invalid_preview');
-  if (!items.length) throw new Error('invalid_preview');
   const utterances = [];
   for (let i = 0; i < items.length; i++) {
     const u = selected(Object.getOwnPropertyDescriptor(items, String(i)).value, ['segment_id', 'text', 'vocal_affect']);
@@ -119,7 +116,6 @@ export function projectAudioPreview(preview, { user_id, session_id } = {}) {
   }
   return validateChatInput({ schema_version: INPUT_SCHEMA, mode: 'audio', user_id, session_id, audio: { transcript, scene: { summary: sceneIn.scene_summary, uncertainties: sceneIn.uncertainties, source_provider: sceneIn.source_provider, source_model: sceneIn.source_model }, utterances } });
 }
-
 export function buildMessage(input) {
   const x = validateChatInput(input);
   if (x.mode === 'text') return x.text;
@@ -155,30 +151,39 @@ export async function sendChat(input, { baseUrl, apiKey, fetchImpl = globalThis.
     } catch { throw boundedError(timedOut ? 'timeout' : signal?.aborted ? 'aborted' : 'transport_error'); }
     if (!response.ok) throw boundedError('http_error');
     const ct = response.headers.get('content-type')?.toLowerCase() ?? '';
-    const isSse = ct.includes('text/event-stream');
-    if (!isSse && !ct.includes('application/json')) throw boundedError('unexpected_content_type');
+    if (!ct.includes('text/event-stream')) {
+      if (ct.includes('application/json')) throw boundedError('provider_error');
+      throw boundedError('unexpected_content_type');
+    }
     if (!response.body) throw boundedError('empty_response');
     reader = response.body.getReader();
     let bytes = 0, buffer = '', reply = '', ended = false, eventCount = 0;
     const trace = [], encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true });
     const event = frame => {
       if (encoder.encode(frame).byteLength > MAX_FRAME_BYTES) throw boundedError('frame_too_large');
-      const data = [];
-      for (const line of frame.split(/\r?\n/)) if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
-      if (!data.length) return;
+      const lines = frame.split(/\r?\n/);
+      if (lines.every(line => line.startsWith(':'))) return;
       if (++eventCount > MAX_EVENTS) throw boundedError('too_many_events');
-      if (ended) throw boundedError('invalid_response');
+      const data = [];
+      for (const line of lines) if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+      if (ended) {
+        if (frame.trim()) throw boundedError('invalid_response');
+        return;
+      }
+      if (!data.length) return;
       let obj;
       try { obj = JSON.parse(data.join('\n')); } catch { throw boundedError('invalid_response'); }
       if (!plain(obj) || typeof obj.type !== 'string') throw boundedError('invalid_response');
       if (obj.type === 'error') throw boundedError('provider_error');
       if (obj.type === 'end') { ended = true; return; }
       if (obj.type === 'plain') {
+        if (typeof obj.data !== 'string') throw boundedError('invalid_response');
         if (obj.data === CORE_ERROR) throw boundedError('provider_error');
         if (obj.streaming === true) throw boundedError('unexpected_streaming');
-        if (typeof obj.data !== 'string' || obj.data.length === 0) throw boundedError('invalid_response');
+        if (!obj.data.length) throw boundedError('invalid_response');
         if (obj.chain_type !== undefined && obj.chain_type !== null && obj.chain_type !== 'normal') {
-          trace.push({ event_type: 'plain_other_chain' });
+          const labels = ['analysis', 'agent', 'plugin', 'reasoning', 'tool'];
+          trace.push({ event_type: 'plain_other_chain', chain_type: labels.includes(obj.chain_type) ? obj.chain_type : 'other' });
           return;
         }
         reply += obj.data;
@@ -198,25 +203,17 @@ export async function sendChat(input, { baseUrl, apiKey, fetchImpl = globalThis.
       }
       if (encoder.encode(buffer).byteLength > MAX_FRAME_BYTES) throw boundedError('frame_too_large');
     };
-    if (!isSse) {
-      while (true) {
-        if (signal?.aborted) throw boundedError('aborted');
-        let part;
-        try { part = await reader.read(); } catch { throw boundedError(timedOut ? 'timeout' : 'transport_error'); }
-        if (part.done) break;
-        bytes += part.value.byteLength;
-        if (bytes > MAX_RESPONSE_BYTES) throw boundedError('response_too_large');
-      }
-      if (signal?.aborted || timedOut) throw boundedError(timedOut ? 'timeout' : 'aborted');
-      throw boundedError('invalid_response');
-    }
-    while (!ended) {
+    while (true) {
       if (signal?.aborted || timedOut) throw boundedError(timedOut ? 'timeout' : 'aborted');
       let part;
-      try { part = await reader.read(); } catch { throw boundedError(timedOut ? 'timeout' : 'transport_error'); }
+      try { part = await reader.read(); } catch { throw boundedError(timedOut ? 'timeout' : signal?.aborted ? 'aborted' : 'transport_error'); }
       if (part.done) {
-        try { buffer += decoder.decode(); } catch { throw boundedError('invalid_response'); }
-        if (buffer.length) throw boundedError('invalid_response');
+        try { consumeText(decoder.decode()); } catch (e) { if (e?.code) throw e; throw boundedError('invalid_response'); }
+        if (buffer.length) {
+          const residual = buffer.split(/\r?\n/);
+          if (!residual.every(line => line.startsWith(':'))) throw boundedError('invalid_response');
+          buffer = '';
+        }
         break;
       }
       bytes += part.value.byteLength;
@@ -235,12 +232,10 @@ export async function sendChat(input, { baseUrl, apiKey, fetchImpl = globalThis.
     signal?.removeEventListener('abort', abort);
   }
 }
-
 function reasonCode(error) {
   const allowed = new Set(['invalid_input', 'invalid_preview', 'invalid_configuration', 'aborted', 'timeout', 'transport_error', 'http_error', 'unexpected_content_type', 'empty_response', 'frame_too_large', 'too_many_events', 'invalid_response', 'provider_error', 'reply_too_large', 'response_too_large', 'unexpected_streaming', 'incomplete_response', 'message_too_large', 'output_exists', 'input_io_error', 'output_io_error', 'response_error']);
-  return allowed.has(error?.code) ? error.code : 'response_error';
-}
-async function exclusive(file, contents) { await writeFile(file, contents, { encoding: 'utf8', flag: 'wx', mode: 0o600 }); }
+  return allowed.has(error?.code) ? error.code : allowed.has(error?.message) ? error.message : 'response_error';
+}async function exclusive(file, contents) { await writeFile(file, contents, { encoding: 'utf8', flag: 'wx', mode: 0o600 }); }
 
 export async function runCli(argv, env) {
   let outDir;
@@ -293,7 +288,6 @@ export async function runCli(argv, env) {
     return 1;
   }
 }
-
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   process.exitCode = await runCli(process.argv.slice(2), process.env);
 }
