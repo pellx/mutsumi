@@ -133,6 +133,64 @@ function localBase(baseUrl) {
 }
 function boundedError(reason) { const e = new Error(reason); e.code = reason; return e; }
 
+const TOOL_NAMES = new Set(['mutsumi_web_search', 'mutsumi_video_captions', 'mutsumi_knowledge_search', 'mutsumi_memory_search', 'mutsumi_memory_candidate']);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function boundedToolId(value) { return typeof value === 'string' && value.length > 0 && value.length <= 200 && IDENT.test(value); }
+function safeTitle(value) { return typeof value === 'string' && [...value].length <= 200 ? value : null; }
+function externalUrl(value, max = 1000) {
+  if (typeof value !== 'string' || value.length > max) return null;
+  try {
+    const u = new URL(value);
+    const host = u.hostname.toLowerCase().replace(/\.$/, '');
+    if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password || isIP(host) || !host.includes('.') || host === 'localhost' || /(^|\.)(local|localhost|internal|test|example|invalid|onion)$/.test(host)) return null;
+    return u.href;
+  } catch { return null; }
+}
+function safeRecordId(value) { return typeof value === 'string' && value.length <= 200 && /^[A-Za-z0-9_-]+$/.test(value) ? value : null; }
+function parseToolContent(value) {
+  let text;
+  if (typeof value === 'string') text = value;
+  else if (Array.isArray(value) && value.length <= 32 && value.every(x => plain(x) && x.type === 'text' && typeof x.text === 'string')) text = value.map(x => x.text).join('\n\n');
+  else return null;
+  try { const parsed = JSON.parse(text); return plain(parsed) ? parsed : null; } catch { return null; }
+}
+function projectToolResult(toolName, value) {
+  const data = parseToolContent(value);
+  if (!data) return { status: 'unavailable', refs: [], actions: [] };
+  if (toolName === 'mutsumi_memory_candidate') {
+    const actions = [];
+    if (data.status === 'candidate') {
+      const candidates = [];
+      if (typeof data.memory_id === 'string') candidates.push(data.memory_id);
+      if (Array.isArray(data.records)) for (const item of data.records.slice(0, 8)) if (plain(item) && typeof item.memory_id === 'string') candidates.push(item.memory_id);
+      for (const memory_id of candidates) if (UUID.test(memory_id) && actions.length < 8 && !actions.some(x => x.memory_id === memory_id)) actions.push({ action: 'candidate', memory_id: memory_id.toLowerCase(), status: 'candidate' });
+      return { status: 'candidate', refs: [], actions };
+    }
+    return { status: data.status === 'unknown_write_outcome' ? 'unknown_write_outcome' : 'unavailable', refs: [], actions };
+  }
+  if (data.status === 'empty' || (data.status === 'ok' && (Array.isArray(data.results) ? data.results.length === 0 : toolName === 'mutsumi_video_captions' && !data.source_url))) return { status: 'empty', refs: [], actions: [] };
+  if (data.status !== 'ok') return { status: data.status === 'unknown_write_outcome' ? 'unknown_write_outcome' : 'unavailable', refs: [], actions: [] };
+  const refs = [];
+  if (toolName === 'mutsumi_web_search' && Array.isArray(data.results)) {
+    for (const item of data.results.slice(0, 32)) if (plain(item)) { const title = safeTitle(item.title), url = externalUrl(item.url); if (title !== null && url) refs.push({ kind: 'web', title, url }); }
+  } else if (toolName === 'mutsumi_knowledge_search' && Array.isArray(data.results)) {
+    for (const item of data.results.slice(0, 32)) if (plain(item)) { const kb_id = safeRecordId(item.kb_id), doc_id = safeRecordId(item.doc_id), chunk_id = safeRecordId(item.chunk_id), title = safeTitle(item.title); if (kb_id && doc_id && chunk_id && title !== null) refs.push({ kind: 'knowledge', kb_id, doc_id, chunk_id, title }); }
+  } else if (toolName === 'mutsumi_video_captions') {
+    const source_url = externalUrl(data.source_url); const title = safeTitle(data.title);
+    if (source_url && title !== null) refs.push({ kind: 'video_captions', source_url, title });
+  }
+  return { status: 'ok', refs, actions: [] };
+}
+function addToolResult(call, rawResult, trace, references, memoryActions) {
+  const projected = projectToolResult(call.name, rawResult);
+  trace.push({ event_type: 'tool_result', tool_name: call.name, status: projected.status });
+  for (const ref of projected.refs) {
+    const key = JSON.stringify(ref);
+    if (references.length < 12 && !references.some(x => JSON.stringify(x) === key)) references.push(ref);
+  }
+  for (const action of projected.actions) if (memoryActions.length < 8 && !memoryActions.some(x => x.memory_id === action.memory_id)) memoryActions.push(action);
+}
+
 export async function sendChat(input, { baseUrl, apiKey, fetchImpl = globalThis.fetch, signal, timeoutMs = 90000 } = {}) {
   const clean = validateChatInput(input);
   const message = buildMessage(clean);
