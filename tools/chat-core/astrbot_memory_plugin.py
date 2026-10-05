@@ -54,6 +54,25 @@ def _bounded_text(value: object) -> str | None:
     return value
 
 
+def _original_message_text(event: AstrMessageEvent) -> str | None:
+    try:
+        raw = event.message_obj.message_str
+    except Exception:
+        return None
+    if not isinstance(raw, str) or len(raw) > 2048:
+        return None
+    return raw
+
+
+def _is_raw_direct_memory_command(raw: str | None) -> bool:
+    if raw is None:
+        return False
+    for command in ("/记住", "/记忆", "/确认记忆", "/修正记忆", "/忘记"):
+        if raw.startswith(command) and (len(raw) == len(command) or raw[len(command)].isspace()):
+            return True
+    return False
+
+
 def _source_identity(event: AstrMessageEvent) -> str | None:
     try:
         sender_id = event.get_sender_id()
@@ -287,7 +306,8 @@ class MutsumiMemoryPlugin(Star):
     @filter.on_llm_request()
     async def add_confirmed_memory_context(self, event: AstrMessageEvent, req) -> None:
         prompt = getattr(req, "prompt", None)
-        if not isinstance(prompt, str) or prompt.lstrip().startswith("/"):
+        if (not isinstance(prompt, str) or prompt.lstrip().startswith("/")
+                or _is_raw_direct_memory_command(_original_message_text(event))):
             return
         query = prompt[:_MAX_TEXT]
         marker_at = prompt.find(_AUDIO_MARKER)
@@ -350,11 +370,8 @@ class MutsumiMemoryPlugin(Star):
 
     @filter.command("记忆")
     async def list_memories(self, event: AstrMessageEvent) -> AsyncGenerator:
-        try:
-            raw = event.get_message_str()
-        except Exception:
-            raw = None
-        if not isinstance(raw, str) or raw.rstrip() != "/记忆":
+        raw = _original_message_text(event)
+        if raw is None or raw.rstrip() != "/记忆":
             yield self._reply(event, "请单独发送 /记忆 查看记录。")
             return
         scope, status = await self._owned_scope(event)
@@ -484,13 +501,12 @@ class MutsumiMemoryPlugin(Star):
 
     @classmethod
     def _direct_argument(cls, event: AstrMessageEvent, prefix: str, handler_text: str) -> str | None:
-        try:
-            raw = event.get_message_str()
-        except Exception:
-            return None
-        if not isinstance(raw, str) or not raw.startswith(prefix):
+        raw = _original_message_text(event)
+        if raw is None or not raw.startswith(prefix):
             return None
         argument = raw[len(prefix):]
+        if len(argument) > _MAX_TEXT:
+            return None
         if cls._normalise_argument(argument) != cls._normalise_argument(str(handler_text)):
             return None
         argument = argument.strip()
@@ -500,11 +516,8 @@ class MutsumiMemoryPlugin(Star):
 
     @classmethod
     def _direct_id(cls, event: AstrMessageEvent, prefix: str, memory_id: str) -> bool:
-        try:
-            raw = event.get_message_str()
-        except Exception:
-            return False
-        return isinstance(raw, str) and raw.startswith(prefix) and cls._normalise_argument(raw[len(prefix):]) == memory_id
+        raw = _original_message_text(event)
+        return raw is not None and raw.startswith(prefix) and cls._normalise_argument(raw[len(prefix):]) == memory_id
 
     @staticmethod
     def _reply(event: AstrMessageEvent, message: str):
