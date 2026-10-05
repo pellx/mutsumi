@@ -139,7 +139,9 @@ def main(argv: list[str]|None=None)->int:
         root=runtime_root(args.runtime_root); validate(read_config(root)); verify_version()
         if args.check:
             print(json.dumps({"astrbot_version":PINNED_VERSION,"dashboard_host":"127.0.0.1","request_attempts":1},separators=(",",":"))); return 0
-        os.environ["ASTRBOT_ROOT"]=str(root); os.environ["ASTRBOT_CLI"]="1"; os.chdir(root); asyncio.run(serve(root)); return 0
+        runtime_path=str(root)
+        if runtime_path not in sys.path: sys.path.insert(0,runtime_path)
+        os.environ["ASTRBOT_ROOT"]=runtime_path; os.environ["ASTRBOT_CLI"]="1"; os.chdir(root); asyncio.run(serve(root)); return 0
     except BootstrapError as e: print(f"bootstrap_error:{e}",file=sys.stderr); return 2
     except (KeyboardInterrupt,asyncio.CancelledError): return 0
     except Exception: print("bootstrap_error:startup_failed",file=sys.stderr); return 2
