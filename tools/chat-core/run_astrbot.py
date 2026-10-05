@@ -37,13 +37,35 @@ def validate(c: dict[str,Any])->None:
     if obj(cfg.get("compression"),"compression").get("overflow_strategy")!="truncate_by_turns": raise BootstrapError("compression_strategy_invalid")
     if c.get("provider_sources",[])!=[]: raise BootstrapError("provider_sources_not_allowed")
     ps=c.get("provider")
-    if not isinstance(ps,list) or len(ps)!=1: raise BootstrapError("provider_selection_invalid")
-    x=obj(ps[0],"provider")
-    if x.get("enable") is not True or x.get("type")!=PROVIDER_TYPE: raise BootstrapError("provider_selection_invalid")
+    if not isinstance(ps,list) or not 1<=len(ps)<=2: raise BootstrapError("provider_selection_invalid")
+    providers=[obj(item,"provider") for item in ps]
+    ids=[item.get("id") for item in providers]
+    if any(not isinstance(value,str) or not value.strip() for value in ids) or len(set(ids))!=len(ids): raise BootstrapError("provider_ids_invalid")
+    chats=[item for item in providers if item.get("type")==PROVIDER_TYPE]
+    embeddings=[item for item in providers if item.get("type")=="openai_embedding"]
+    if len(chats)!=1 or len(embeddings)>1 or len(chats)+len(embeddings)!=len(providers): raise BootstrapError("provider_selection_invalid")
+    x=chats[0]
+    if x.get("enable") is not True: raise BootstrapError("provider_selection_invalid")
     if x.get("id")!=pid: raise BootstrapError("provider_id_mismatch")
     if x.get("model")!=MODEL or x.get("api_base")!=API_BASE: raise BootstrapError("provider_settings_invalid")
     keys=x.get("key")
     if not isinstance(keys,list) or len(keys)!=1 or not isinstance(keys[0],str) or not keys[0].strip(): raise BootstrapError("provider_key_missing")
+    if embeddings:
+        e=embeddings[0]
+        if e.get("enable") is not True or e.get("id")==pid: raise BootstrapError("embedding_provider_invalid")
+        if e.get("embedding_model")!="BAAI/bge-small-zh-v1.5" or type(e.get("embedding_dimensions")) is not int or e.get("embedding_dimensions")!=512 or e.get("embedding_dimensions_mode")!="never": raise BootstrapError("embedding_settings_invalid")
+        base=e.get("embedding_api_base")
+        import re
+        match=re.fullmatch(r"http://127\.0\.0\.1:([0-9]+)/v1",base) if isinstance(base,str) else None
+        if not match or not 1<=int(match.group(1))<=65535: raise BootstrapError("embedding_endpoint_invalid")
+        api_key=e.get("embedding_api_key")
+        if not isinstance(api_key,str) or len(api_key.strip())<24 or "\r" in api_key or "\n" in api_key: raise BootstrapError("embedding_key_invalid")
+        timeout=e.get("timeout",20)
+        if type(timeout) is not int or not 1<=timeout<=30: raise BootstrapError("embedding_timeout_invalid")
+        if e.get("proxy","") not in (None,""): raise BootstrapError("embedding_proxy_not_allowed")
+        for header_name in ("request_headers","custom_headers"):
+            headers=e.get(header_name)
+            if headers is not None and (not isinstance(headers,dict) or headers): raise BootstrapError("embedding_headers_not_allowed")
 def runtime_root(arg: str)->Path:
     p=Path(arg)
     if not p.is_absolute(): raise BootstrapError("runtime_root_must_be_absolute")
