@@ -46,7 +46,7 @@ function id(v, max) {
   return v;
 }
 function denseArray(value, maxCount, error = 'invalid_input') {
-  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length === 0 || value.length > maxCount) throw new Error(error);
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length > maxCount) throw new Error(error);
   const own = Reflect.ownKeys(value);
   if (own.length !== value.length + 1 || !own.includes('length')) throw new Error(error);
   for (let i = 0; i < value.length; i++) {
