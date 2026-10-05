@@ -215,3 +215,10 @@ Local integration accepted after34 structural and7 subprocess checks plus one fr
 先固定PyPI稳定AstrBot4.28.2（官方GitHub最新为4.29.0-beta.1，首部署不用beta），仅用官方发布wheel，SHA256核对。E仅438MB、C约1.48GB、D约13.37GB；监督使用D:/mutsumi-runtime/astrbot 独立运行目录/虚拟环境，仓库仍E:/mutsumi/mutsumi，实际机器路径只存ignored配置/交接，迁移重建。不删除原模型、不改全局代理/页面文件/驱动，不污染声音虚拟环境。安装为用户授权本地部署的必要操作，新增实际云端provider/收费检索服务需明确配置，不默认为Codex自带工具可供角色使用。
 
 监督负责部署/私有配置/真实验收；所有新增应用连接代码继续ChatGPT认证gpt-6-luna CLI单文件实现及立即分别本地Git提交。先核对实际安装版本API/依赖再写接线；未实现或失败组件明确unavailable。应用配置和真实素材不发送编码模型，不push。
+## D47 — 本轮 GitHub同步与成熟组件实际边界（2026-10-05）
+
+用户明确要求“把上一个任务完成，然后让我们把他上传到github”，并授权使用已经登录的GitHub账号推送；覆盖D29仅本地提交的临时安排。origin仍https://github.com/pellx/mutsumi.git，现有Git Credential Manager实际push dry-run成功；不需从网页复制登录令牌。每次tracked文件实际修改仍立即单独Git提交，正式推送须在本轮审查和新历史凭据扫描后完成。私人音频/会话/.env/模型/运行时数据库/令牌不进入仓库。
+
+D46实施采用AstrBot4.28.2独立本地核心、Mem0 OSS2.2.1明确记忆管理、本地FastEmbed0.8.1中文BGE512维、原生FAISS知识库。正文Gemini3.8既有供应商不变，Jev/TTS保持独立未接通。源代码仍通过ChatGPT认证gpt-6-luna CLI实现；监督承担实际部署、配置和独立QA，不能用coder成功声明取代实际gitdiff/测试。
+
+免费联网工具复用DDGS9.16.0，真实部署发现不存在Bing后端，包会自动切换；先前Bing标签为误标，公开查询实际由auto多引擎返回。修正选择当前可用免费Yahoo单引擎，调用前验证注册表存在并显式指定，无收费搜索钥匙/模型回退。yt-dlp2026.8.19只尝试YouTube字幕，实际示例获取失败；不宣称已经看过视频画面、听过音轨或支持任意网站。详见持续更新验收记录。
