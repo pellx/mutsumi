@@ -20,6 +20,7 @@ _DEFAULT_BASE_URL = "http://127.0.0.1:6186"
 _MAX_RESPONSE_BYTES = 64 * 1024
 _MAX_TEXT = 400
 _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}\Z", re.ASCII)
+_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,95}\Z", re.ASCII)
 _UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z", re.ASCII)
 _AUDIO_MARKER = "\nAUDIO_CONTEXT_JSON\n"
 
@@ -185,14 +186,15 @@ class MutsumiMemoryPlugin(Star):
 
     @staticmethod
     def _valid_ref(value: object) -> bool:
-        return isinstance(value, str) and 1 <= len(value) <= 96 and _ID_RE.fullmatch(value) is not None
+        return isinstance(value, str) and _REF_RE.fullmatch(value) is not None
 
     @classmethod
     def _project_record(cls, record: object) -> dict | None:
         if not isinstance(record, dict) or not _plain_data(record):
             return None
         memory_id, text, metadata = record.get("id"), record.get("text"), record.get("metadata")
-        if not _canonical_memory_id(memory_id) or _bounded_text(text) is None or not isinstance(metadata, dict):
+        if (not _canonical_memory_id(memory_id) or not isinstance(text, str) or len(text) > _MAX_TEXT
+                or _bounded_text(text) is None or not isinstance(metadata, dict)):
             return None
         status = metadata.get("status")
         kind = metadata.get("source_kind")
@@ -391,7 +393,8 @@ class MutsumiMemoryPlugin(Star):
             "source_session_id": refs[0], "source_turn_id": refs[1]}, mutation=True)
         record = self._mutation_record(body or {}, status="confirmed", memory_id=memory_id) if body else None
         metadata = record["metadata"] if record else {}
-        if (record is None or metadata.get("confirmed_by_explicit_user") is not True
+        if (record is None or metadata.get("status") != "confirmed"
+                or metadata.get("confirmed_by_explicit_user") is not True
                 or metadata.get("confirmation_session_id") != refs[0]
                 or metadata.get("confirmation_turn_id") != refs[1]):
             yield self._reply(event, self._write_failure("unknown_write_outcome" if body is not None else status))
