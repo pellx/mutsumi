@@ -2,7 +2,7 @@
 
 ## 接续位置
 
-原设备交接时，所有者要求同步至 https://github.com/pellx/mutsumi 以换设备。新设备接续后，所有者确认 D29：当前只写入和提交本地仓库，迁移设备时再同步，不因模块通过就自动推送。本文件区分原设备历史阻塞与新设备实际验收。
+原设备交接时，所有者要求同步至 https://github.com/pellx/mutsumi 以换设备。D29曾要求暂时仅本地；最新D47明确授权本轮完成后推送GitHub。本文件保留历史验收，当前进度先看末尾M03和 docs/reviews/M03-astrbot-chat-core.md。
 
 最新已批准方案是 D28：Gemini 保留转写/背景描述，Qwen3-ForcedAligner 在本地接收同一段音频和指定文字，只负责原生字词时间；后续 Gemini 情绪阶段独立。背景描述不能充当强制对齐文字。不得均分时间、把不同 ASR 文字按序贴到参考文字上，或静默重试/改回 Paraformer。
 
@@ -221,3 +221,21 @@ Luna单文件修复任务 M02-vocal-affect-wire-repair.md，应用仍指定ChatG
 最新8770服务 .runtime/qa/character-starts-listening-server.mjs/session49335，顶部第03段原混音/人声/伴奏、4片段与23字块、真实细卡片（旧fumo/衣柜仍在下面）。标明初次失败及最新独立运行，优先选择fixed001真实结果，17音轨metadata、4新细profiles、0零长通过；截图 .runtime/qa/seven-03-listening.png。QA/audio/raw/.env均ignored；换设备私下搬素材、重建环境和服务，不保证进程迁移。用户暂无本例真人听审反馈。
 
 本轮Luna完整1report备份 .runtime/harness-runs/affect-wire-worker/harness-runs且SHA256逐文件核对；sourceblob53739e76592b1f94f7cf5bfd57fc25bff17dd7cd与主相同。干净已合入affect-wire-worker已清理，未验收jev-quota-worker保留。所有tracked任务/验收/文档各自立即单文件本地提交，无push。当前仅监督分阶段真人验收成功，原音统一生产入口/人格/记忆/自定义TTS未因此完成。
+
+### M03 成熟聊天核心的本机恢复（2026-10-05，D46/D47）
+
+主仓库仍 E:/mutsumi/mutsumi；两个服务在D盘隔离环境，不污染音频环境。AstrBot4.28.2/Python3.12.14位于 D:/mutsumi-runtime/astrbot/venv，Mem0 OSS2.2.1/FastEmbed0.8.1位于 D:/mutsumi-runtime/memory/venv，两套pip check通过。AstrBot环境另有DDGS9.16.0/yt-dlp2026.8.19。冻结清单和安装报告留各运行目录，迁移须重建，不能直接假定旧机器虚拟环境可复制使用。
+
+本地中文嵌入：BAAI/bge-small-zh-v1.5，下载仓库Qdrant/bge-small-zh-v1.5固定revision46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59，5文件95221432bytes，model-manifest.json保存各文件哈希。缓存目录 D:/mutsumi-runtime/memory/models，实际512维有限向量；不自动联网补模型。Mem0语义检索未安装BM25/spaCy可选模型，初始化相应提示不代表稠密模型失败。AstrBot原生KB另用FAISS/原生稀疏索引，与个人Mem0记忆分开。
+
+启动memory_service.py先在该进程设置私有MUTSUMI_MEMORY_API_KEY（至少24字符，不放命令行/日志），使用memory虚拟环境Python执行 tools/chat-core/memory_service.py --data-dir D:/mutsumi-runtime/memory/data --cache-dir D:/mutsumi-runtime/memory/models --port 6186。服务只监听127.0.0.1，API鉴权X-API-Key，embedding兼容Bearer/base64；infer=False不调用远端LLM。Qdrant/history数据私下备份迁移，删除活动记忆仍保留审计历史。
+
+AstrBot运行根 D:/mutsumi-runtime/astrbot 需 .astrbot文件和data/cmd_config.json。先部署当前源码 tools/chat-core/astrbot_memory_plugin.py 到 data/plugins/astrbot_plugin_mutsumi_memory/main.py，astrbot_public_tools_plugin.py到 data/plugins/astrbot_plugin_mutsumi_public_tools/main.py；逐文件核对哈希。进程私有MUTSUMI_MEMORY_API_KEY与本地服务一致，MUTSUMI_MEMORY_BASE_URL=http://127.0.0.1:6186。再用astrbot虚拟环境Python执行 tools/chat-core/run_astrbot.py --runtime-root D:/mutsumi-runtime/astrbot --check，成功后去掉 --check 启动。启动器把规范运行根加入sys.path以加载data.plugins，进程互斥astrbot.lock，不修改框架安装源码。
+
+当前dashboard http://127.0.0.1:6185/，随机密码在admin-private.json；chat-private.json保存本地chat scope令牌、普通username和base_url。这些文件都私下搬运或重新签发，绝不提交Git。现有唯一正文provider为OhMyGPT gemini-3.8-flash，仍一次尝试无模型/key回退；最新有界max_tokens4096，旧1024多次记忆生成503后该预算实际召回通过，不宣称所有503根因已证实。可选第二provider仅本地openai_embedding/BGE512维，timeout20、dimensions_mode never、空proxy/custom headers。platform/provider_sources均空；不启用陌生收费provider。
+
+人格Mutsumi，近期截轮历史24轮；plugin_set仅mutsumi_memory/mutsumi_public_tools。知识库“Mutsumi项目说明”已有公开工程说明1文档/3块，kb_names只选该库、kb_agentic_mode=true；插件在LLM请求时移除原生未有界astr_kb_search，保留带真实来源的短查询wrapper。人格只允许5个mutsumi工具：memory_search/candidate、knowledge_search、web_search、video_captions。命令 /记住 内容、/记忆、/确认记忆 UUID、/修正记忆 UUID 内容、/忘记 UUID；确认/删除只接受真实直接用户命令，不能让LLM代用户确认。
+
+搜索固定DDGS/Yahoo/us-en，调用前验证真实注册表存在，无静默auto切换；免费公开查询不附私人对话。YouTube工具仅尝试字幕不下载媒体/cookies，实际当前样例unavailable；不能声称已看画面/听音轨。Jev和TTS未在此核心连接。chat.mjs的输入JSON与输出目录用私有data；客户端读取进程环境MUTSUMI_CHAT_API_KEY/MUTSUMI_CHAT_BASE_URL，不自动加载.env。原音试听8770仍是独立QA页面，服务进程不保证迁移存活。
+
+完整检查与真实结果见 reviews/M03-astrbot-chat-core.md，应用全部gpt-6-luna CLI逐文件提交。private data/.env/.runtime/运行根/模型/聊天记录均不push。新的核心端到端工具和客户端旁路来源仍在验收收尾，以记录实际结果为准；迁移请先重新测硬件/磁盘/运行环境，不沿用本机结论。
