@@ -49,7 +49,7 @@ def _search_result(status: str, results: list[dict[str, str]]) -> str:
     payload: dict[str, object] = {
         "status": status,
         "provider": "DDGS",
-        "backend": "bing",
+        "backend": "Yahoo",
         "results": results,
         "data_is_untrusted": True,
     }
@@ -358,7 +358,7 @@ class MutsumiPublicTools(Star):
 
     @filter.llm_tool(name="mutsumi_web_search")
     async def web_search(self, event: AstrMessageEvent, query: str) -> str:
-        """Search public web pages with Bing through DDGS.
+        """Search public web pages with Yahoo through DDGS.
 
         Args:
             query(string): A short public search query, up to 200 codepoints.
@@ -370,10 +370,15 @@ class MutsumiPublicTools(Star):
         try:
             async def search() -> object:
                 from ddgs import DDGS
+                from ddgs.engines import ENGINES
+
+                text_engines = ENGINES.get("text")
+                if not isinstance(text_engines, dict) or "yahoo" not in text_engines:
+                    raise RuntimeError("Yahoo text backend unavailable")
 
                 return await asyncio.to_thread(
                     lambda: DDGS(timeout=8).text(
-                        query, max_results=3, backend="bing", region="cn-zh", safesearch="moderate"
+                        query, max_results=3, backend="yahoo", region="cn-zh", safesearch="moderate"
                     )
                 )
 
@@ -488,14 +493,13 @@ class MutsumiPublicTools(Star):
             selected_names = list(dict.fromkeys(names))
             if not selected_names:
                 return _knowledge_json("unavailable", [])
-            manager = self.context.kb_manager
-            for name in selected_names:
-                helper = await manager.get_kb_by_name(name)
-                if helper is None or getattr(helper, "init_error", None):
-                    return _knowledge_json("unavailable", [])
-
             async def retrieve() -> object:
-                return await self.context.kb_manager.retrieve(
+                manager = self.context.kb_manager
+                for name in selected_names:
+                    helper = await manager.get_kb_by_name(name)
+                    if helper is None or getattr(helper, "init_error", None):
+                        return {}
+                return await manager.retrieve(
                     query=query,
                     kb_names=selected_names,
                     top_k_fusion=6,
@@ -503,8 +507,10 @@ class MutsumiPublicTools(Star):
                 )
 
             raw = await _serialized(_KNOWLEDGE_LOCK, retrieve, 30)
-            if raw is None or (isinstance(raw, dict) and not raw):
+            if isinstance(raw, dict) and not raw:
                 return _knowledge_json("unavailable", [])
+            if raw is None:
+                return _knowledge_json("empty", [])
             results = _project_knowledge_results(raw)
             if results is None:
                 return _knowledge_json("unavailable", [])
