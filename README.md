@@ -1,13 +1,16 @@
 # mutsumi
 
-情绪语音助手原型。当前优先完成 CLI 输入分析：音频 → Gemini 提取文字与背景声音 → 本地强制对齐 → Gemini 判断情绪。之后再接人格、记忆、对话和 TTS。已有 NestJS 服务和浏览器原型保留，前端后续再完善。
+情绪语音助手原型。音频输入先分析整体声音，再分离人声、转写、按停顿分句、定位句内字头并分析语气。已处理的音频 JSON 和纯文本共用 AstrBot 人格聊天核心，Gemini 生成适合 TTS 的中文正文；长期记忆使用本地 Mem0，知识库使用 AstrBot 原生组件。完整 LLM 工具循环、自定义音色和 Jev 表达仍有未验收能力。
 
-## 当前状态（2026-10-02）
+## 当前状态（2026-10-05）
 
 - 已有供应商无关的标注契约、严格校验、原始音频存储、FFmpeg 接入、会话存储与上下文/表达计划基础模块。
 - 已有阿里云上传/ASR、OhMyGPT 音频分析，以及分离后的 Gemini 转写与 Qwen-Audio 时间适配器。Qwen-Audio 仍会改写文字，真实录音对照被拒绝，不能当作准确的强制对齐。
 - 已选本地 `Qwen3-ForcedAligner-0.6B`，Luna 已交付 [本地 worker](tools/local-aligner/align.py)。新设备 CPU FP32 离线真人录音推理通过；已知原生零时长录音被明确拒绝并保留全部诊断。GPU 推理、旧录音/Gemini 对照及声学边界听审仍未验收，见 [本机验收记录](docs/reviews/M02-local-forced-aligner-new-device.md)。
-- 独立情绪阶段、分离流程的 CLI 入口仍待实现。回复文本已选 Gemini、表达已选 Jev，真实适配与完整流程尚待接入。新增本地 Qwen3-TTS 1.7B CustomVoice CPU 离线试部署和独立 worker，实际中文音频已生成；音质/情绪待试听，CPU 耗时较长，尚未接入完整回复链路。现有开发 mock 不能代表完整真实语音能力。
+- 分离、按停顿分句、句内字头和细致语气分析已有 CLI。第03段真人素材的新流程已生成可校验结果；原生重合字头保留，模型候选和未知不冒充实测。见 [真人流程记录](docs/reviews/M02-seven-case03-flow.md)。
+- 原创 Mutsumi 人格、纯文本/处理后音频 JSON 到真实 Gemini 正文、近期历史跨服务重启、明确记忆写入/确认/修正/删除及新会话带记忆回复均已验证。客户端输出正文与来源、工具状态、记忆动作分开，Jev/TTS 未接入。见 [聊天核心验收](docs/reviews/M03-astrbot-chat-core.md)。
+- 本地知识库真实检索和固定 Yahoo 免费搜索已验证。Gemini 完整工具循环仍返回上游 HTTP503；绕过项目代码的最小标准 function-calling 请求也失败，不能称工具聊天已通过。YouTube 字幕样例不可用，视频画面/音轨理解 unavailable。
+- Qwen3-TTS 1.7B CustomVoice 历史预设音色 CPU 试部署已生成中文音频；用户要求自定义音色，当前方案不作为最终选型，Qwen3-TTS 与 IndexTTS 比较另行完成。
 - TypeScript 构建和 287 项现有测试通过；本机直接运行对应的 build/test 命令验证。结构测试通过不等于识别、切片和情绪质量通过。
 
 换设备请先读 [交接说明](docs/device-handoff.md)，然后读 [已确认决策](docs/decisions.md)。历史任务和评审记录中的旧方案不覆盖最新决策。
@@ -46,7 +49,7 @@ node tools/harness/run-luna.mjs --check
 node tools/harness/run-luna.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=600000
 ```
 
-每次实现只修改一个指定文件，由监督者立即单独提交后继续。当前只提交本地仓库，迁移设备时再同步 GitHub（D29）。`.env`、私人录音/会话与原始响应 `data/`、编码记录/虚拟环境 `.runtime/`、依赖与构建产物均不提交。
+每次实现只修改一个指定文件，由监督者立即单独提交后继续。用户已授权本轮完成后同步 GitHub（D47）；当前工具循环验收失败，同步范围待确认，以验收记录和实际远端状态为准。`.env`、私人录音/会话与原始响应 `data/`、编码记录/虚拟环境 `.runtime/`、依赖与构建产物均不提交。
 
 架构见 [docs/architecture.md](docs/architecture.md)，接口见 [docs/contracts.md](docs/contracts.md)，流程见 [voice-system-flow.md](voice-system-flow.md)。
 
@@ -110,3 +113,12 @@ node tools/harness/run-luna.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=
 
 统一人声 CLI 的 --emotion 使用同一 Gemini 音频请求返回并严格校验 vocal_affect，保存于 emotion/emotion.json；分句、原文及字头时间不变。8770 私有试听页已有细致展示区，旧结果不补造描述，真实新分析尚待具体云端目的地确认。结构通过不等于真人语气质量通过。
 2026-10-05 已用七段压缩包第03段完成真实分阶段测试：原音整体分析、人声分离与转写、自动4停顿片段、24原生字单位／23占用块、4句细致语气候选。最初情绪请求失败，Luna修复远端生成schema兼容性及依据提示后，新CLI exit0/partial、emotion complete；重合字头仍保留partial，没有补时间。完整验收及局限见 [第03段记录](docs/reviews/M02-seven-case03-flow.md)。[8770试听页](http://127.0.0.1:8770/) 顶部可对照三轨、字块和新语气依据。听感、转写和情绪候选仍待真人核对，当前生产CLI依然从已分离音频与文字开始。
+## 人格聊天入口
+
+先按 [交接说明](docs/device-handoff.md) 恢复独立 Mem0 和 AstrBot 服务。客户端不自动读取 `.env`；启动它的进程需设置 `MUTSUMI_CHAT_BASE_URL` 和私有 `MUTSUMI_CHAT_API_KEY`，避免把密钥写入命令行或提交仓库。输入契约为 `mutsumi-chat-input-1`，具体字段和示例见 [聊天设计](docs/chat-core-integration-design.md) 与任务 [客户端](docs/tasks/M03-astrbot-chat-client.md)。
+
+```sh
+node tools/chat-core/chat.mjs --input-file data/chat-input.json --output-dir data/chat-run-001
+```
+
+输出目录必须新建或为空。正文 `reply_text` 供后续 TTS；`references`、`tool_trace`、`memory_actions` 是独立旁路数据，不朗读原始工具结果或推理。合成 SSE 检查通过仅证明客户端格式处理；实际 LLM 工具调用未通过。框架新会话可能另调相同模型生成标题，单次请求不重试不等于每个聊天 HTTP 请求只调用模型一次。
