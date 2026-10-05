@@ -83,8 +83,9 @@ def register_adapter()->None:
         from astrbot.core.provider.register import register_provider_adapter
         from astrbot.core.provider.sources.openai_source import ProviderOpenAIOfficial
     except ImportError as e: raise BootstrapError("astrbot_api_incompatible") from e
-    init=ProviderOpenAIOfficial.__init__; chat=ProviderOpenAIOfficial.text_chat; stream=ProviderOpenAIOfficial.text_chat_stream; err=ProviderOpenAIOfficial._handle_api_error
+    init=ProviderOpenAIOfficial.__init__; chat=ProviderOpenAIOfficial.text_chat; stream=ProviderOpenAIOfficial.text_chat_stream; convert=ProviderOpenAIOfficial._finally_convert_payload; err=ProviderOpenAIOfficial._handle_api_error
     if not inspect.isfunction(init) or len(inspect.signature(init).parameters)<3: raise BootstrapError("provider_api_incompatible")
+    if not inspect.isfunction(convert) or list(inspect.signature(convert).parameters) != ["self", "payloads"]: raise BootstrapError("provider_api_incompatible")
     for fn,gen in ((chat,False),(stream,True)):
         if (gen and not inspect.isasyncgenfunction(fn)) or (not gen and not inspect.iscoroutinefunction(fn)): raise BootstrapError("provider_api_incompatible")
         q=inspect.signature(fn).parameters
@@ -96,6 +97,12 @@ def register_adapter()->None:
             super().__init__(provider_config,provider_settings); client=getattr(self,"client",None)
             if client is None or not hasattr(client,"max_retries"): raise BootstrapError("provider_client_incompatible")
             client.max_retries=0
+        def _finally_convert_payload(self,payloads: dict[str,Any])->None:
+            super()._finally_convert_payload(payloads)
+            for message in payloads.get("messages",[]):
+                content=message.get("content")
+                if isinstance(content,list) and content and all(isinstance(part,dict) and set(part)=={"type","text"} and part.get("type")=="text" and isinstance(part.get("text"),str) for part in content):
+                    message["content"]="\\n\\n".join(part["text"] for part in content)
         @staticmethod
         def bound(fn: Any,self: Any,args: tuple[Any,...],kwargs: dict[str,Any])->inspect.BoundArguments:
             try: b=inspect.signature(fn).bind_partial(self,*args,**kwargs)
