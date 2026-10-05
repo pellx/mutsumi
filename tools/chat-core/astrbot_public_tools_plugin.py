@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+from importlib import metadata
 import math
 import re
 from collections.abc import Awaitable, Callable
@@ -20,6 +21,14 @@ _KNOWLEDGE_LOCK = asyncio.Lock()
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _CAPTION_LANGUAGES = ("zh-Hans", "zh-Hant", "zh", "en")
 _MAX_CAPTION_BYTES = 512 * 1024
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def _package_matches(distribution: str, expected: str) -> bool:
+    try:
+        return metadata.version(distribution) == expected
+    except Exception:
+        return False
 
 
 def _json(value: object) -> str:
@@ -108,42 +117,55 @@ def _canonical_youtube_url(value: object) -> str | None:
         return None
 
 
+def _retain_task(task: asyncio.Task) -> None:
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+
+def _release_after_completion(lock: asyncio.Lock, task: asyncio.Task) -> None:
+    async def wait_and_release() -> None:
+        try:
+            await task
+        except BaseException:
+            pass
+        finally:
+            lock.release()
+
+    cleanup = asyncio.create_task(wait_and_release())
+    _retain_task(cleanup)
+
+
 async def _serialized(
     lock: asyncio.Lock,
     operation: Callable[[], Awaitable[object]],
     timeout: float,
 ) -> object:
-    await lock.acquire()
-    task = asyncio.create_task(operation())
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, timeout)
+    await asyncio.wait_for(lock.acquire(), timeout=max(0.0, deadline - loop.time()))
+    remaining = deadline - loop.time()
+    if remaining <= 0:
+        lock.release()
+        raise TimeoutError
+
     try:
-        done, _ = await asyncio.wait({task}, timeout=timeout)
-        if not done:
-            async def release_after_completion() -> None:
-                try:
-                    await task
-                except BaseException:
-                    pass
-                finally:
-                    lock.release()
-
-            asyncio.create_task(release_after_completion())
-            raise TimeoutError
-        return task.result()
-    except asyncio.CancelledError:
-        async def release_after_cancellation() -> None:
-            try:
-                await task
-            except BaseException:
-                pass
-            finally:
-                lock.release()
-
-        asyncio.create_task(release_after_cancellation())
-        raise
+        task = asyncio.create_task(operation())
     except BaseException:
-        if task.done():
-            lock.release()
+        lock.release()
         raise
+    _retain_task(task)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=max(0.0, deadline - loop.time()))
+    except BaseException:
+        _release_after_completion(lock, task)
+        raise
+    if not done:
+        _release_after_completion(lock, task)
+        raise TimeoutError
+    try:
+        return task.result()
+    finally:
+        lock.release()
 
 
 def _unavailable_video(source_url: str, reason: str = "unavailable") -> str:
@@ -272,31 +294,35 @@ def _project_knowledge_results(value: object) -> list[dict[str, object]] | None:
     if not isinstance(value, dict) or "results" not in value:
         return None
     raw_results = value.get("results")
-    if raw_results is None:
-        return []
-    if not isinstance(raw_results, list):
+    if not isinstance(raw_results, list) or len(raw_results) > 3:
         return None
     projected: list[dict[str, object]] = []
-    for result in raw_results[:3]:
+    for result in raw_results:
         if not isinstance(result, dict):
             return None
-        fields = (
-            ("chunk_id", "chunk_id", 200),
-            ("doc_id", "doc_id", 200),
-            ("kb_id", "kb_id", 200),
-            ("kb_name", "kb_name", 200),
-            ("title", "doc_name", 200),
-            ("text", "content", 1200),
-        )
         item: dict[str, object] = {}
-        for output_name, input_name, limit in fields:
-            raw = result.get(input_name)
-            if not isinstance(raw, str) or not raw:
+        for output_name, input_name in (("chunk_id", "chunk_id"), ("doc_id", "doc_id"), ("kb_id", "kb_id"), ("kb_name", "kb_name")):
+            raw_id = result.get(input_name)
+            if not isinstance(raw_id, str) or not raw_id or len(raw_id) > 200:
                 return None
-            item[output_name] = _clean_text(raw, limit)
+            clean_id = _clean_text(raw_id, 200)
+            if not clean_id or clean_id != raw_id:
+                return None
+            item[output_name] = clean_id
+        for output_name, input_name, limit in (("title", "doc_name", 200), ("text", "content", 1200)):
+            raw_text = result.get(input_name)
+            if not isinstance(raw_text, str) or not raw_text:
+                return None
+            clean_text = _clean_text(raw_text, limit)
+            if not clean_text:
+                return None
+            item[output_name] = clean_text
         score = result.get("score")
-        if isinstance(score, (int, float)) and not isinstance(score, bool) and math.isfinite(float(score)):
-            item["semantic_similarity"] = float(score)
+        if score is not None:
+            if not isinstance(score, (int, float)) or isinstance(score, bool) or not math.isfinite(float(score)):
+                return None
+            item["retrieval_score"] = float(score)
+            item["score_kind"] = "native_rank_fusion"
         projected.append(item)
     return projected
 
@@ -311,6 +337,9 @@ def _knowledge_json(status: str, results: list[dict[str, object]]) -> str:
             last["text"] = text[:-100]
         else:
             results.pop()
+        rendered = _json(payload)
+    if not results and status == "ok":
+        payload["status"] = "unavailable"
         rendered = _json(payload)
     return rendered
 
@@ -334,6 +363,8 @@ class MutsumiPublicTools(Star):
         Args:
             query(string): A short public search query, up to 200 codepoints.
         """
+        if not _package_matches("astrbot", "4.28.2") or not _package_matches("ddgs", "9.16.0"):
+            return _search_result("unavailable", [])
         if not _valid_query(query):
             return _search_result("unavailable", [])
         try:
@@ -373,6 +404,8 @@ class MutsumiPublicTools(Star):
         Args:
             url(string): A canonical YouTube watch URL or youtu.be URL.
         """
+        if not _package_matches("astrbot", "4.28.2") or not _package_matches("yt-dlp", "2026.8.19"):
+            return _unavailable_video("")
         canonical_url = _canonical_youtube_url(url)
         if canonical_url is None:
             return _unavailable_video("")
@@ -441,16 +474,25 @@ class MutsumiPublicTools(Star):
         Args:
             query(string): A concise knowledge query, up to 200 codepoints.
         """
+        if not _package_matches("astrbot", "4.28.2"):
+            return _knowledge_json("unavailable", [])
         if not _valid_query(query):
             return _knowledge_json("unavailable", [])
         try:
             config = self.context.get_config(umo=event.unified_msg_origin)
             names = config.get("kb_names") if isinstance(config, dict) else None
-            if not isinstance(names, list) or not names:
+            if not isinstance(names, list) or not names or len(names) > 3:
                 return _knowledge_json("unavailable", [])
-            selected_names = list(dict.fromkeys(name for name in names if isinstance(name, str) and name.strip()))
+            if any(not isinstance(name, str) or not name or name != name.strip() or len(name) > 200 for name in names):
+                return _knowledge_json("unavailable", [])
+            selected_names = list(dict.fromkeys(names))
             if not selected_names:
                 return _knowledge_json("unavailable", [])
+            manager = self.context.kb_manager
+            for name in selected_names:
+                helper = await manager.get_kb_by_name(name)
+                if helper is None or getattr(helper, "init_error", None):
+                    return _knowledge_json("unavailable", [])
 
             async def retrieve() -> object:
                 return await self.context.kb_manager.retrieve(
@@ -461,8 +503,8 @@ class MutsumiPublicTools(Star):
                 )
 
             raw = await _serialized(_KNOWLEDGE_LOCK, retrieve, 30)
-            if raw is None or raw == {}:
-                return _knowledge_json("empty", [])
+            if raw is None or (isinstance(raw, dict) and not raw):
+                return _knowledge_json("unavailable", [])
             results = _project_knowledge_results(raw)
             if results is None:
                 return _knowledge_json("unavailable", [])
