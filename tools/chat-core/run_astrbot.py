@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pinned AstrBot bootstrap and one-attempt provider."""
 from __future__ import annotations
-import argparse, asyncio, importlib.metadata, inspect, json, os, sys
+import argparse, asyncio, hashlib, importlib.metadata, inspect, json, os, sys
 from pathlib import Path
 from typing import Any
 PINNED_VERSION="4.28.2"; PROVIDER_TYPE="mutsumi_openai_once"; MODEL="gemini-3.8-flash"; API_BASE="https://api.ohmygpt.com/v1"; MAX_CONFIG_BYTES=1024*1024
@@ -25,7 +25,7 @@ def validate(c: dict[str,Any])->None:
     creds=[d.get(k) for k in ("password","pbkdf2_password")]
     if any(v is not None and not isinstance(v,str) for v in creds): raise BootstrapError("dashboard_credentials_invalid")
     good=[v for v in creds if isinstance(v,str) and v.strip()]
-    if not good or any(v=="astrbot" or v.lower()=="5f4dcc3b5aa765d61d8327deb882cf99" for v in good): raise BootstrapError("dashboard_password_required")
+    if not good or any(v=="astrbot" or v.lower()==hashlib.md5(b"astrbot").hexdigest() for v in good): raise BootstrapError("dashboard_password_required")
     if c.get("platform")!=[]: raise BootstrapError("platforms_not_allowed")
     a=obj(c.get("agent_runner"),"agent_runner")
     if a.get("runner_type")!="local": raise BootstrapError("agent_runner_must_be_local")
@@ -33,9 +33,9 @@ def validate(c: dict[str,Any])->None:
     if not isinstance(pid,str) or not pid.strip(): raise BootstrapError("agent_provider_required")
     if m.get("fallback_provider_ids")!=[]: raise BootstrapError("agent_fallbacks_not_allowed")
     r=m.get("request_max_retries")
-    if isinstance(r,bool) or r!=1: raise BootstrapError("agent_retry_count_invalid")
+    if type(r) is not int or r!=1: raise BootstrapError("agent_retry_count_invalid")
     if obj(cfg.get("compression"),"compression").get("overflow_strategy")!="truncate_by_turns": raise BootstrapError("compression_strategy_invalid")
-    ps=c.get("provider")
+    if c.get("provider_sources",[])!=[]: raise BootstrapError("provider_sources_not_allowed")`r`n    ps=c.get("provider")
     if not isinstance(ps,list) or len(ps)!=1: raise BootstrapError("provider_selection_invalid")
     x=obj(ps[0],"provider")
     if x.get("enable") is not True or x.get("type")!=PROVIDER_TYPE: raise BootstrapError("provider_selection_invalid")
@@ -90,7 +90,7 @@ def register_adapter()->None:
 async def serve(root: Path)->None:
     try: from filelock import FileLock,Timeout
     except ImportError as e: raise BootstrapError("runtime_lock_unavailable") from e
-    lock=FileLock(str(root/"runtime"/"astrbot.lock"))
+    lock=FileLock(str(root/"astrbot.lock"))
     try: lock.acquire(timeout=0)
     except Timeout as e: raise BootstrapError("runtime_already_running") from e
     try:
