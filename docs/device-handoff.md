@@ -238,4 +238,10 @@ AstrBot运行根 D:/mutsumi-runtime/astrbot 需 .astrbot文件和data/cmd_config
 
 搜索固定DDGS/Yahoo/us-en，调用前验证真实注册表存在，无静默auto切换；免费公开查询不附私人对话。YouTube工具仅尝试字幕不下载媒体/cookies，实际当前样例unavailable；不能声称已看画面/听音轨。Jev和TTS未在此核心连接。chat.mjs的输入JSON与输出目录用私有data；客户端读取进程环境MUTSUMI_CHAT_API_KEY/MUTSUMI_CHAT_BASE_URL，不自动加载.env。原音试听8770仍是独立QA页面，服务进程不保证迁移存活。
 
-完整检查与真实结果见 reviews/M03-astrbot-chat-core.md，应用全部gpt-6-luna CLI逐文件提交。private data/.env/.runtime/运行根/模型/聊天记录均不push。新的核心端到端工具和客户端旁路来源仍在验收收尾，以记录实际结果为准；迁移请先重新测硬件/磁盘/运行环境，不沿用本机结论。
+完整检查与真实结果见 reviews/M03-astrbot-chat-core.md，应用全部gpt-6-luna CLI逐文件提交。private data/.env/.runtime/运行根/模型/聊天记录均不push。客户端旁路来源42项独立检查已通过，但真实Gemini工具循环HTTP503未通过，以记录实际结果为准；迁移请先重新测硬件/磁盘/运行环境，不沿用本机结论。
+
+### M03 当前运行配置补充
+
+本轮工具循环失败后已通过原生persona API将Mutsumi tools临时设为空列表，并核对原人格提示词不变，恢复已验收正文模式。5工具启用前的私有persona备份在运行根qa/tool-enabled-persona-before-safe-mode.json。两个插件仍启用，记忆自动检索/明确命令保留；知识库/搜索独立执行通过不代表聊天中自动调用通过。不要在迁移时悄悄恢复5工具并宣称端到端已通过。最小直接SDK单function请求也503，待所有者决定既定线路的后续比较范围。
+
+新会话原生标题生成可能额外调用相同Gemini；SDK max_retries=0/一次provider尝试不等于整轮只请求模型一次。本轮合成记忆已从活动检索删除，审计和当前会话仍保留。GitHub仅fetch/dry-run预检，正式push未执行；不要把本地提交当远端已同步。
