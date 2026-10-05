@@ -356,6 +356,12 @@ class MutsumiPublicTools(Star):
     def __init__(self, context: Context, config: dict | None = None) -> None:
         super().__init__(context, config)
 
+    @filter.on_llm_request()
+    async def remove_native_knowledge_tool(self, event: AstrMessageEvent, req) -> None:
+        """Keep KB queries on the selected bounded wrapper with sourced results."""
+        if req.func_tool is not None:
+            req.func_tool.remove_tool("astr_kb_search")
+
     @filter.llm_tool(name="mutsumi_web_search")
     async def web_search(self, event: AstrMessageEvent, query: str) -> str:
         """Search public web pages with Yahoo through DDGS.
@@ -378,7 +384,7 @@ class MutsumiPublicTools(Star):
 
                 return await asyncio.to_thread(
                     lambda: DDGS(timeout=8).text(
-                        query, max_results=3, backend="yahoo", region="cn-zh", safesearch="moderate"
+                        query, max_results=3, backend="yahoo", region="us-en", safesearch="moderate"
                     )
                 )
 
