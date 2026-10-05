@@ -1,0 +1,6 @@
+# M03 final narrow plugin field checks
+Modify ONLY tools/chat-core/astrbot_memory_plugin.py once; current32f3fe8 committed,21independentchecks pass. No privatefiles/env/servicecalls orotherwrites. Prepare in-memory replacements assert exactanchors, single UTF8noBOMwrite; readonly compile via explicit D:/mutsumi-runtime/astrbot/venv/Scripts/python.exe stdin thenstop.
+1 _project_record must reject original raw text len>400 BEFORE trim validation; whitespace padding mustnotbypass rawrecordbudget. Input tool _bounded_text trimming staysunchanged.
+2 _valid_ref currentlyusesuserID _ID_RE max64 eventhoughservice allows1..96. Define separate _REF_RE matchingactualpublicservice `[A-Za-z0-9][A-Za-z0-9._:@+-]{0,95}` ASCII fullmatch; useonlyrefvalidator, keepuseridregex64 unchanged. Actualservice source reference identifiers up to96 allowed; session/turnhashes remain64. No localpaths or arbitraryunicode accepted.
+3 confirm_memory success also requires returned memory.metadata.status == 'confirmed', inadditiontobody.status/actualid/confirmationflag/refsmatch alreadychecked. Malformed200bodycandidate mustunknown outcome, notclaim confirmed.
+No otherbehaviorchange/refactor, no codingtestfiles. Commit supervisor immediately afteronewrite.
