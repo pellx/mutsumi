@@ -102,7 +102,7 @@ def register_adapter()->None:
             for message in payloads.get("messages",[]):
                 content=message.get("content")
                 if isinstance(content,list) and content and all(isinstance(part,dict) and set(part)=={"type","text"} and part.get("type")=="text" and isinstance(part.get("text"),str) for part in content):
-                    message["content"]="\\n\\n".join(part["text"] for part in content)
+                    message["content"]="\n\n".join(part["text"] for part in content)
         @staticmethod
         def bound(fn: Any,self: Any,args: tuple[Any,...],kwargs: dict[str,Any])->inspect.BoundArguments:
             try: b=inspect.signature(fn).bind_partial(self,*args,**kwargs)
