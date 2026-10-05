@@ -285,7 +285,6 @@ export async function sendChat(input, { baseUrl, apiKey, fetchImpl = globalThis.
       if (['tool_call', 'tool_call_result', 'reasoning', 'session_id', 'user_message_saved', 'run_started', 'agent_stats', 'message_saved'].includes(obj.type)) trace.push({ event_type: obj.type });
       else trace.push({ event_type: 'metadata' });
     };
-    };
     const consumeText = text => {
       buffer += text;
       let match;
