@@ -59,7 +59,8 @@ def _make_memory(data: Path, cache: Path, factory: Callable | None) -> Any:
 
 def build_service(data_dir: str | Path, cache_dir: str | Path, token: str,
                   memory_factory: Callable | None = None):
-    if not isinstance(token, str) or len(token) < 24: raise ValueError("API key must contain at least 24 characters")
+    if not isinstance(token, str) or len(token) < 24 or not token.strip() or "\r" in token or "\n" in token:
+        raise ValueError("API key must contain at least 24 nonblank characters and no line breaks")
     data, cache = _absolute(data_dir, False), _absolute(cache_dir, True)
     data.mkdir(parents=True, exist_ok=True)
     _offline(data, cache)
@@ -160,12 +161,18 @@ def build_service(data_dir: str | Path, cache_dir: str | Path, token: str,
     operation_lock = asyncio.Lock()
 
     async def wait_thread(fn):
+        import anyio
         task = asyncio.create_task(asyncio.to_thread(fn))
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            try: await task
-            finally: raise
+        interrupted = False
+        with anyio.CancelScope(shield=True):
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    interrupted = True
+        if interrupted:
+            raise asyncio.CancelledError
+        return task.result()
 
     @asynccontextmanager
     async def lifespan(app):
