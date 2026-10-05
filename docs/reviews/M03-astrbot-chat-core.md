@@ -6,7 +6,7 @@
 
 独立 AstrBot 4.28.2（AGPL-3.0-or-later），Python3.12.14，运行目录 D:/mutsumi-runtime/astrbot。官方 wheel SHA256 `2d3b5db74da5b5c1aa7e1b5990b3ab4cb5569bc8e6bb331b54ce3d154b1b3530`，实际 pip check 通过。桌面音频/分离/对齐/TTS 环境保持独立。当前项目位置 E:/mutsumi/mutsumi；历史文档的 D:/voicebot 不能当本机路径。
 
-启动器 tools/chat-core/run_astrbot.py 固定框架版本、127.0.0.1、强随机后台密码、无消息平台和回退模型、截轮历史压缩。独立供应商子类固定既有 OhMyGPT gemini-3.8-flash，仅一次请求，SDK max_retries=0，原异常立即上抛；不修改供应商安装源码。15项结构检查及实际安装 OpenAI SDK MockTransport 4项检查通过，400/429/500各只发一次，异模型覆盖在请求前拒绝；这些是合成输送检查，没有云调用。实际进程互斥检查返回 runtime_already_running。
+启动器 tools/chat-core/run_astrbot.py 固定框架版本、127.0.0.1、强随机后台密码、无消息平台和回退模型、截轮历史压缩。独立供应商子类固定既有 OhMyGPT gemini-3.8-flash，每次供应商调用仅一次尝试，SDK max_retries=0，原异常立即上抛；不修改供应商安装源码。15项结构检查及实际安装 OpenAI SDK MockTransport 4项检查通过，400/429/500各只发一次，异模型覆盖在请求前拒绝；这些是合成输送检查，没有云调用。实际进程互斥检查返回 runtime_already_running。
 
 服务本机地址 http://127.0.0.1:6185/。后台密码/API令牌保存在运行目录私有配置，未进入 Git。Chat API令牌仅 chat scope；本版本使用 X-API-Key，普通用户ID不能冒充默认后台 astrbot 用户。实际安装版本 OpenAPI/源码核对了用户名、session、persona、SSE、知识库及插件接口，未照旧文档猜字段。
 
@@ -62,3 +62,17 @@ AstrBot原生知识库已建立“Mutsumi项目说明”，导入一份公开工
 在服务又一次重新启动后、完全新会话查询已确认合成事实，最终真实Gemini回答“根据保存的记录，你偏好的是乌龙茶。”，测得12041ms，最终请求响应预算4096，未换供应商/模型/增加自动重试。此前1024预算的多次503及纯字符串30秒超时均保留，单例恢复不独立证明供应商所有503由预算导致。当前body仍严格6000字符，后续Jev/TTS未连接。结果在 ignored data/acceptance/m03-memory-chat-live-001/recall-budget4096.json，原录音/实际语音时钟不变。
 
 公共工具33独立检查通过；真实nativeKB wrapper返回3资料块及真实来源。初版公开搜索实际auto多引擎返回结果而误标Bing，已修固定Yahoo/注册表检查；cn-zh两个调用无可解析结果，明确unavailable。随后监督单独以us-en查Yahoo实际3官方结果，Startpage失败、DuckDuckGo3结果仅诊断，不自动provider回退。继续固定Yahoo/us-en修复和真实插件复验中。原视频字幕样例失败，画面/音轨仍unavailable。客户端新引用辅助函数草稿尚未接SSE，监督要求完整接线后才能验收，不能将helpers编译通过当已完成。
+
+## 本轮收尾状态（2026-10-05，以此覆盖前面的进行中快照）
+
+最终客户端主316bc8d、worker61bd639已通过语法检查及42项独立检查：27项原有输入/SSE/时限检查和15项工具来源检查。实际已安装版本的 tool_call/result 以真实工具调用ID关联；仅已知工具的成功结果可投影引用，未知/失败/孤立事件不造来源，参数、正文、私有URL与原始推理不进入旁路输出。候选记忆动作按真实插件 records[].id 保存。这些追加工具事件测试为合成结构证据，不能充当真实 Gemini 工具循环验收。
+
+主fc5dcd5公共工具最终固定Yahoo/us-en且移除原生未经有界投影的 astr_kb_search。33独立检查通过；真实插件接线到原生知识库返回3块，两个公开查询分别返回3来源，记录 D:/mutsumi-runtime/astrbot/qa/public-tools-yahoo-usen-live.json。这是实际工具单独执行，不等于Gemini已经调用工具。YouTube字幕仍 unavailable，画面/音轨能力未接入。
+
+明确记忆操作和跨会话带记忆生成回复已通过。随后以最终客户端删除剩余合成“乌龙茶”事实，再列出活动记忆，实际回复“没有可列出的记忆记录。”。验收事实不留在用户活动偏好中；审计和已有聊天记录仍保留，不能称全部抹除。Jev和TTS状态不变。
+
+启用5个允许工具后的真实框架聊天失败，测得19172ms；SSE保留开始/错误/结束事件，tool_events为空，未产生可验收的工具引用或正常回复。另绕过所有项目代码，以既有OhMyGPT Gemini线路、OpenAI SDK和一个标准function schema直接请求，max_tokens8192，仍HTTP503，测得30500ms；私有诊断 tool-schema-one-diagnostic.json保留。当前线路的function calling未通过，不能判定永久不支持，也不自动换模型、供应商、钥匙或重试。已向所有者询问先同步明确部分验收版本，还是允许比较兼容Gemini线路后再完整验收；尚无选择时保持现有线路。
+
+原生框架在新会话缺少标题时会额外调用相同provider生成标题；实际日志也出现该调用503。此前耗时/次数为外层聊天HTTP请求，不是总模型调用计数。一次尝试适配器限制每次provider请求的重试，不限制框架标题或工具循环产生的多个请求。未修改安装源码或宣称关闭标题生成。
+
+Git当前远端main为本地祖先，正常fetch成功，无需强推。收尾前已扫描590个可达历史blob，实际配置密钥匹配0、受保护私有路径跟踪0；README/收尾文档后再扫描新增历史。正式push仍未执行，不能把dry-run或网页登录当已上传。
