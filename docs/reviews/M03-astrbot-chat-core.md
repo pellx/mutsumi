@@ -29,3 +29,10 @@ DDGS9.16.0 与 yt-dlp2026.8.19 已安装在隔离 AstrBot 环境，pip check 通
 ## GitHub 同步
 
 用户本轮明确要求完成任务后上传，覆盖历史 D29 的暂时仅本地提交。现有 origin 为 https://github.com/pellx/mutsumi.git；git push --dry-run origin main 已成功，验证现有 Git 凭据有写权限，未实际推送。监督已扫描528历史blob，已配置实际密钥匹配0，.env/data/.runtime跟踪路径0；最终推送前补扫新增提交。没有从浏览器复制会话令牌。
+## 已完成子任务：JSON/纯文本进入人格回复（2026-10-05）
+
+客户端最终主提交 c246c31。27项独立检查全部通过、云调用0：真实原生 SSE/plain 和完整 EOF/end、跨块 end 后非法事件拒绝、UTF8/CRLF、组合消息预算、getter/稀疏数据拒绝、候选状态及空不确定性、实际第03段展示JSON的有界投影、已有输出不改动、真实本地HTTP挂起响应截止。源代码只在 Luna CLI 中修改，监督 QA 位于 ignored .runtime/qa/astrbot-chat-checks.mjs。现有 TypeScript构建及287tests/19suites回归本轮重新通过。
+
+通过最终客户端再作两次实际 Gemini 请求，不是手工伪造回复或mock：纯文本按原创人格回应，约7773ms；第03段真人录音已经融合的整体场景/原文/逐句语气 JSON 投影进入相同核心，约7475ms，回复认为原文类似《小王子》开头并自然继续对话。没有发送本地文件路径、完整字头/占用数组、原始音频或API密钥；候选与未知保留，不把故事内容写成用户事实。这里验证数据到回复的接线，不证明该文学联想经过外部资料核实。两次结果都明确 expression=unavailable/jev_not_connected，tts=unavailable/not_requested，未声称情绪表达或音频已生成。
+
+实际输入/结果与测得请求时间存于 ignored data/acceptance/m03-chat-client-live-001；计时是本机真实请求耗时，非语音字时间。角色系统仍缺 Mem0服务→AstrBot桥接、原生KB配置、搜索/视频插件启用的完整验收，不能称完整机器人已经完成。用户要求先完成当前小子任务并报告状态，监督正在收尾已启动的记忆服务修复，不将后续尚未启动任务当已完成。GitHub仅预检，尚未实际推送。
