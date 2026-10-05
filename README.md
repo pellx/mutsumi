@@ -121,4 +121,4 @@ node tools/harness/run-luna.mjs docs/tasks/TASK.md --effort=medium --timeout-ms=
 node tools/chat-core/chat.mjs --input-file data/chat-input.json --output-dir data/chat-run-001
 ```
 
-输出目录必须新建或为空。正文 `reply_text` 供后续 TTS；`references`、`tool_trace`、`memory_actions` 是独立旁路数据，不朗读原始工具结果或推理。合成 SSE 检查通过仅证明客户端格式处理；实际 LLM 工具调用未通过。框架新会话可能另调相同模型生成标题，单次请求不重试不等于每个聊天 HTTP 请求只调用模型一次。
+输出目录必须尚不存在，由客户端创建；已有目录会被拒绝。正文 `reply_text` 供后续 TTS；`references`、`tool_trace`、`memory_actions` 是独立旁路数据，不朗读原始工具结果或推理。合成 SSE 检查通过仅证明客户端格式处理；实际 LLM 工具调用未通过。框架新会话可能另调相同模型生成标题，单次请求不重试不等于每个聊天 HTTP 请求只调用模型一次。
