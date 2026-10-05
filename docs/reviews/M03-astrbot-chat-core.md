@@ -54,3 +54,11 @@ DDGS9.16.0 与 yt-dlp2026.8.19 已安装在隔离 AstrBot 环境，pip check 通
 AstrBot原生知识库已建立“Mutsumi项目说明”，导入一份公开工程事实、3真实chunk，本地嵌入512维。初次 max_retries=0 失败：实际框架 get_embeddings_batch 使用 range(max_retries)，字段实为总尝试次数；仅更正调用配置为1后成功，未修改框架。真实retrieve返回doc_id/chunk_id/内容，本地无云LLM。原生score是归一化融合排序分，不冒充相似度或正确概率。工具桥接另行独立审查中。
 
 主08cebec .env.example新增本地聊天和记忆服务地址/空密钥变量；实际私有令牌均留运行目录，模板不包含密钥。搜索/字幕插件原稿审查发现成功后锁未释放，已交Luna修复，不把原稿声称可用。字幕仅字幕能力，画面/声音理解仍unavailable。GitHub尚未实际推送，完整验收和最终新增历史密钥扫描完成后执行。
+
+## 记忆桥接生成回复已通过（2026-10-05）
+
+删除路由真实复验暴露额外来源字段被strict schema拒绝，主695ab80投影仅user_id/memory_id；21独立插件检查增加删除payload精确字段断言通过。实际 /忘记 已返回活动检索删除并明确审计仍保留，原失败候选已清理。bootstrap主159c52c/ea4269d在原生深复制payload转换阶段将纯text列表无损拼接为字符串，保持临时no_save内容，图像/未知块不变；8独立实际SDK检查通过，包括原文顺序/真实换行/no_save/400429500一次请求，云调用0。
+
+在服务又一次重新启动后、完全新会话查询已确认合成事实，最终真实Gemini回答“根据保存的记录，你偏好的是乌龙茶。”，测得12041ms，最终请求响应预算4096，未换供应商/模型/增加自动重试。此前1024预算的多次503及纯字符串30秒超时均保留，单例恢复不独立证明供应商所有503由预算导致。当前body仍严格6000字符，后续Jev/TTS未连接。结果在 ignored data/acceptance/m03-memory-chat-live-001/recall-budget4096.json，原录音/实际语音时钟不变。
+
+公共工具33独立检查通过；真实nativeKB wrapper返回3资料块及真实来源。初版公开搜索实际auto多引擎返回结果而误标Bing，已修固定Yahoo/注册表检查；cn-zh两个调用无可解析结果，明确unavailable。随后监督单独以us-en查Yahoo实际3官方结果，Startpage失败、DuckDuckGo3结果仅诊断，不自动provider回退。继续固定Yahoo/us-en修复和真实插件复验中。原视频字幕样例失败，画面/音轨仍unavailable。客户端新引用辅助函数草稿尚未接SSE，监督要求完整接线后才能验收，不能将helpers编译通过当已完成。
