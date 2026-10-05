@@ -451,7 +451,8 @@ class MutsumiMemoryPlugin(Star):
         if scope is None:
             yield self._reply(event, "记忆服务不可用。")
             return
-        body, status = await self._request("/memory/delete", {**scope, "memory_id": memory_id}, mutation=True)
+        payload = {"user_id": scope["user_id"], "memory_id": memory_id}
+        body, status = await self._request("/memory/delete", payload, mutation=True)
         if body is None or body.get("status") != "ok" or body.get("active_retrieval_deleted") is not True or body.get("history_retained") is not True:
             yield self._reply(event, self._write_failure("unknown_write_outcome" if body is not None else status))
         else:
